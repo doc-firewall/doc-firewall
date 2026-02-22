@@ -77,3 +77,10 @@ scripts/
 run_benchmark.sh
 Dockerfile
 docker-compose.yml
+
+# Exceptions
+!examples/docker/Dockerfile
+
+
+
+
