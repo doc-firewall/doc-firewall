@@ -54,14 +54,7 @@ pip install -e .
 
 ## 📚 Documentation
 
-Full documentation is available at [https://doc-firewall.readthedocs.io](https://doc-firewall.readthedocs.io) (example).
-
-To build the documentation locally:
-
-```bash
-pip install mkdocs-material mkdocstrings[python]
-mkdocs serve
-```
+Full documentation is available at [https://www.docfirewall.com](https://www.docfirewall.com).
 
 ---
 
