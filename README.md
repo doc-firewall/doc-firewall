@@ -111,23 +111,7 @@ docker run --rm -v $(pwd):/app doc-firewall scripts/validate_with_doc_firewall.p
 
 ---
 
-## 📊 Benchmarking & Reproducibility
-
-DocFirewall includes a comprehensive benchmarking suite to generate datasets and validate performance.
-
-```bash
-# 1. Run the full benchmark pipeline (Dataset Gen -> Scan -> Metrics -> Report)
-./run_benchmark.sh
-```
-
-This will produce:
-- `metrics_summary.json`: Detailed F1/Precision/Recall stats.
-- `evaluation_report.docx`: A Word document summarizing the security posture.
-- `scan_results.jsonl`: Raw logs of every file scanned.
-
----
-
-## 🔧 Configuration
+##  Configuration
 
 You can tune DocFirewall via `ScanConfig`:
 
