@@ -1,0 +1,38 @@
+# DocFirewall Configuration File (YAML)
+
+# --- General ---
+# Environment profile (strict, balanced, lenient)
+profile: balanced
+
+# Toggle specific scan modules
+enable_antivirus: true
+enable_yara: true
+enable_prompt_injection: true
+enable_pii_checks: false
+
+# --- Antivirus Settings ---
+antivirus:
+  # Provider options: "clamav", "virustotal", "generic_cli"
+  provider: virustotal
+  
+  # For VirusTotal
+  virustotal_api_key: "YOUR_VT_API_KEY_HERE"
+  
+  # For ClamAV
+  clamav_bin_path: "clamscan"
+  # clamav_socket_path: "/var/run/clamav/clamd.ctl"
+  
+  # For Custom/Other (e.g., Sophos, Windows Defender)
+  # generic_cli_command: "sophos_scan --file {path}" 
+  # generic_cli_infected_codes: [1, 2]
+
+# --- Limits & Timeouts ---
+limits:
+  max_mb: 10
+  parse_timeout_ms: 15000
+  antivirus_timeout_ms: 10000
+
+# --- Threat Detection Thresholds (0.0 - 1.0) ---
+thresholds:
+  flag: 0.35
+  block: 0.80

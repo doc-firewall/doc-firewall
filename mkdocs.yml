@@ -1,0 +1,135 @@
+site_name: DocFirewall
+site_description: Secure Document Intake for AI Pipelines
+site_url: https://doc-firewall.github.io/doc-firewall/
+repo_url: https://github.com/doc-firewall/doc-firewall
+repo_name: doc-firewall
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  custom_dir: docs/overrides
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.tracking
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.tabs.link
+    - content.code.annotation
+    - content.code.copy
+  language: en
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: deep purple
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: deep purple
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+  font:
+    text: Roboto
+    code: Roboto Mono
+  favicon: assets/favicon.png
+  logo: assets/logo.png
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+  - minify:
+      minify_html: true
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - meta
+  - md_in_html
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+extra:
+  consent:
+    title: Cookie consent
+    description: >- 
+      We use cookies to recognize your repeated visits and preferences, as well
+      as to measure the effectiveness of our documentation and whether users
+      find what they're searching for. With your consent, you're helping us to
+      make our documentation better.
+    actions:
+      - accept
+      - reject
+      - manage
+  analytics:
+    provider: google
+    property: G-XXXXXXXXXX
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/doc-firewall/doc-firewall
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/doc-firewall
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/brand.js
+
+nav:
+  - Home: index.md
+  - Overview: overview.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quickstart.md
+    - Configuration: getting-started/configuration.md
+    - Examples: getting-started/examples.md
+  - Core Concepts:
+    - Architecture: concepts/architecture.md
+    - Threat Model: concepts/threats.md
+    - Risk Scoring: concepts/risk-scoring.md
+  - Features:
+    - Overview: features/overview.md
+    - Antivirus Integration: features/antivirus.md
+    - Watermark Handling: features/watermarks.md
+    - Metadata Security: features/metadata.md
+  - API Reference:
+    - Python API: api/python.md
+    - CLI: api/cli.md
+    - Docker: api/docker.md
+  - Development:
+    - Contributing: development/contributing.md
+    - Benchmarking: development/benchmarking.md

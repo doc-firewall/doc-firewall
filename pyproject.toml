@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "doc-firewall"
+version = "0.1.0"
+description = "LLM-aware document intake security scanning for PDF/DOCX"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{name="DocFirewall Contributors"}]
+license = {text="MIT"}
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+  "docling>=1.0.0",
+  "numpy>=1.24.0",
+  "sentence-transformers>=2.2.0",
+  "pandas>=2.0.0",
+  "matplotlib>=3.7.0",
+  "python-docx>=1.1.0",
+  "openpyxl>=3.1.0",
+  "defusedxml>=0.7.1",
+  "structlog>=24.1.0",
+  "pydantic>=2.0",
+  "pydantic-settings>=2.0.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "build",
+    "twine",
+    "pytest",
+    "ruff",
+]
+
+[project.urls]
+Homepage = "https://github.com/doc-firewall/doc-firewall"
+Documentation = "https://doc-firewall.github.io/doc-firewall/"
+Repository = "https://github.com/doc-firewall/doc-firewall"
+Issues = "https://github.com/doc-firewall/doc-firewall/issues"
+
+[project.scripts]
+doc-firewall = "doc_firewall.cli.main:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "B"]  # Enable pycodestyle (E), Pyflakes (F), and flake8-bugbear (B)
+ignore = []

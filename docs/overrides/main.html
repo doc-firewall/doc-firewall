@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+
+{% block extrahead %}
+  <link rel="apple-touch-icon" href="{{ base_url }}/assets/favicon.png">
+  <link rel="icon" type="image/png" href="{{ base_url }}/assets/favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+  {% if page.is_homepage %}
+    <div class="landing-page">
+      
+      <!-- Hero Section -->
+      <section class="hero-section">
+        <div class="hero-grid-bg"></div>
+        <div class="hero-glow"></div>
+        <div class="hero-container">
+          <div class="hero-content">
+            <div class="hero-badge">
+              <span class="badge-dot"></span>
+              v0.1.0 &mdash; Now in Beta
+            </div>
+            <h1 class="hero-title">
+              Secure Document Intake <span class="text-gradient">for AI Pipelines</span>
+            </h1>
+            <p class="hero-subtitle">
+              Protect your LLMs and RAG systems from prompt injection, malicious payloads, and data exfiltration hidden in PDFs and DOCX files.
+            </p>
+            <div class="hero-cta">
+              <a href="{{ base_url }}/getting-started/quickstart/" class="btn btn-primary">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                Get Started
+              </a>
+              <a href="https://github.com/doc-firewall/doc-firewall" class="btn btn-ghost" target="_blank">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                GitHub
+              </a>
+            </div>
+            <div class="hero-meta">
+              <span class="hero-meta-item">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                MIT Licensed
+              </span>
+              <span class="hero-meta-item">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                &lt;10ms Fast Scan
+              </span>
+              <span class="hero-meta-item">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"></path></svg>
+                Docker Ready
+              </span>
+            </div>
+          </div>
+          <div class="hero-visual">
+            <div class="terminal-glow"></div>
+            <div class="code-window">
+              <div class="code-header">
+                <span class="dot red"></span>
+                <span class="dot yellow"></span>
+                <span class="dot green"></span>
+                <span class="code-tab active">terminal</span>
+              </div>
+              <div class="code-body">
+<pre><code><span class="prompt">$</span> pip install doc-firewall
+<span class="dim">Collecting doc-firewall...</span>
+<span class="dim">Successfully installed doc-firewall-0.1.0</span>
+
+<span class="prompt">$</span> doc-firewall scan untrusted_resume.pdf
+
+<span class="output-info">&#9654; Scanning untrusted_resume.pdf (245 KB)</span>
+<span class="output-info">&#9654; Fast Scan ................ <span class="output-pass">DONE</span> (8ms)</span>
+<span class="output-info">&#9654; Deep Scan ............... <span class="output-pass">DONE</span> (1.2s)</span>
+
+<span class="output-block">&#9608; Verdict: BLOCK   Risk: 0.95</span>
+<span class="output-finding">  - [HIGH] T4_PROMPT_INJECTION</span>
+<span class="output-detail">    Hidden instructions detected in white text</span>
+<span class="output-finding">  - [HIGH] T7_EMBEDDED_PAYLOAD</span>
+<span class="output-detail">    Suspicious hex blob (PE header signature)</span></code></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Stats Section -->
+      <section class="stats-section">
+        <div class="stats-container">
+          <div class="stat-item">
+            <div class="stat-number">9</div>
+            <div class="stat-label">Threat Vectors</div>
+          </div>
+          <div class="stat-divider"></div>
+          <div class="stat-item">
+            <div class="stat-number">100%</div>
+            <div class="stat-label">F1 Score</div>
+          </div>
+          <div class="stat-divider"></div>
+          <div class="stat-item">
+            <div class="stat-number">&lt;10ms</div>
+            <div class="stat-label">Fast Scan</div>
+          </div>
+          <div class="stat-divider"></div>
+          <div class="stat-item">
+            <div class="stat-number">2</div>
+            <div class="stat-label">Scan Stages</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Features Section -->
+      <section class="features-section">
+        <div class="section-header">
+          <span class="section-label">Capabilities</span>
+          <h2 class="section-title">Defense in Depth</h2>
+          <p class="section-subtitle">A multi-layered architecture designed specifically for the unique threats facing modern AI applications.</p>
+        </div>
+        
+        <div class="features-grid">
+          <div class="feature-card">
+            <div class="feature-icon-wrapper">
+              <svg class="feature-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+            </div>
+            <h3>LLM-Aware Scanning</h3>
+            <p>Detects prompt injections, invisible text, and semantic manipulation designed to poison RAG systems and hijack LLM context windows.</p>
+            <span class="feature-tag">T4 · T5 · T9</span>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-icon-wrapper">
+              <svg class="feature-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+            </div>
+            <h3>Deep Document Parsing</h3>
+            <p>Powered by Docling, extracts high-fidelity logical representations of PDFs and DOCX files to uncover threats that bypass standard parsers.</p>
+            <span class="feature-tag">Docling Powered</span>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-icon-wrapper">
+              <svg class="feature-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+            </div>
+            <h3>Two-Stage Architecture</h3>
+            <p>Fast byte-level scan in under 10ms catches obvious threats, then a deep semantic scan analyzes complex attack vectors.</p>
+            <span class="feature-tag">Fast Scan · Deep Scan</span>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-icon-wrapper">
+              <svg class="feature-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path></svg>
+            </div>
+            <h3>Antivirus Integration</h3>
+            <p>Integrates with ClamAV, VirusTotal, and Yara for signature-based detection to block known malware before it reaches your AI.</p>
+            <span class="feature-tag">ClamAV · Yara</span>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-icon-wrapper">
+              <svg class="feature-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+            </div>
+            <h3>Risk Scoring</h3>
+            <p>Provides a comprehensive risk score with detailed findings, letting you set automated thresholds for quarantine or rejection.</p>
+            <span class="feature-tag">Configurable Thresholds</span>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-icon-wrapper">
+              <svg class="feature-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>
+            </div>
+            <h3>Easy Integration</h3>
+            <p>Available as a Python library, CLI tool, and Docker container. Drop it into your existing data pipelines with minimal configuration.</p>
+            <span class="feature-tag">Python · CLI · Docker</span>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- Code Example Section -->
+      <section class="code-section">
+        <div class="code-container">
+          <div class="code-text">
+            <span class="section-label">Developer Experience</span>
+            <h2>Simple API, Powerful Protection</h2>
+            <p>Integrate DocFirewall into your existing Python backend with just a few lines of code. Configure custom risk thresholds and threat profiles via YAML.</p>
+            <ul class="feature-list">
+              <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg> Synchronous and Asynchronous APIs</li>
+              <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg> Detailed JSON reporting</li>
+              <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg> Extensible detector framework</li>
+              <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg> YAML-based configuration</li>
+            </ul>
+          </div>
+          <div class="code-window dark">
+            <div class="code-header">
+              <span class="dot red"></span>
+              <span class="dot yellow"></span>
+              <span class="dot green"></span>
+              <span class="code-tab active">app.py</span>
+            </div>
+            <div class="code-body">
+<pre><code><span class="keyword">from</span> doc_firewall <span class="keyword">import</span> Scanner, ScanConfig
+
+<span class="comment"># Initialize with custom thresholds</span>
+config = ScanConfig(
+    max_risk_score=<span class="number">0.7</span>,
+    block_on_high_severity=<span class="keyword">True</span>
+)
+scanner = Scanner(config)
+
+<span class="comment"># Scan incoming file</span>
+report = scanner.scan(<span class="string">"upload.pdf"</span>)
+
+<span class="keyword">if</span> report.verdict == <span class="string">"BLOCK"</span>:
+    <span class="keyword">raise</span> SecurityException(report.findings)
+    
+<span class="comment"># Safe to pass to LLM</span>
+process_document(report.file_path)</code></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Bottom CTA -->
+      <section class="bottom-cta-section">
+        <div class="cta-glow"></div>
+        <div class="cta-container">
+          <span class="section-label">Open Source</span>
+          <h2>Ready to secure your AI pipeline?</h2>
+          <p>Start scanning documents in minutes. MIT licensed and free to use.</p>
+          <div class="hero-cta" style="justify-content: center;">
+            <a href="{{ base_url }}/overview/" class="btn btn-primary">
+              Read the Documentation
+            </a>
+            <a href="{{ base_url }}/getting-started/installation/" class="btn btn-ghost">
+              Installation Guide
+            </a>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  {% else %}
+    {{ super() }}
+  {% endif %}
+{% endblock %}
