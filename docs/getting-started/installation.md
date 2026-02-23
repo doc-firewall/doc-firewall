@@ -9,15 +9,11 @@ DocFirewall can be installed via pip or used as a Docker container.
 
 ## Standard Installation
 
-To install DocFirewall locally, clone the repository and install it in editable mode (or build a wheel).
+To install DocFirewall locally, use pip.
 
 ```bash
-# Clone the repository
-git clone https://github.com/doc-firewall/doc-firewall.git
-cd doc-firewall
-
-# Install in editable mode
-pip install -e .
+# Install the package from PyPI
+pip install doc-firewall
 ```
 
 !!! tip "Virtual Environments"
@@ -25,7 +21,7 @@ pip install -e .
     ```bash
     python -m venv venv
     source venv/bin/activate
-    pip install -e .
+    pip install doc-firewall
     ```
 
 ## External Dependencies
