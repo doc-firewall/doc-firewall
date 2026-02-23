@@ -30,7 +30,7 @@ except ImportError:
 
 if HAS_DOCLING:
 
-    @lru_cache(maxsize=1)
+    # @lru_cache(maxsize=1)  # Removed LRU cache to prevent pypdfium2 shutdown errors
     def _converter() -> DocumentConverter:
         pipeline_options = PdfPipelineOptions()
         pipeline_options.do_ocr = False

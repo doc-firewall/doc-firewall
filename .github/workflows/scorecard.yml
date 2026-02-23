@@ -7,6 +7,7 @@ on:
   # https://github.com/ossf/scorecard/blob/main/docs/checks.md#maintained
   schedule:
     - cron: '20 7 * * 2'
+  workflow_dispatch:
   push:
     branches: [ "main", "master" ]
   pull_request:
