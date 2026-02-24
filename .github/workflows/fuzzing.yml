@@ -1,0 +1,23 @@
+name: Fuzzing
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 2 * * *'  # Run daily at 2:30 AM
+permissions: read-all
+jobs:
+  atheris:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.10
+      - name: Install dependencies
+        run: |
+          pip install atheris docling # And other deps
+          pip install .
+      - name: Run Fuzzer
+        # Run for a limited time (e.g., 60 seconds) in CI to check for crashes
+        run: |
+          python3 tests/fuzz_target.py -atheris_runs=10000
