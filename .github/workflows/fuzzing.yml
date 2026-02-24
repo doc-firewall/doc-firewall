@@ -15,7 +15,7 @@ jobs:
           python-version: "3.10"
       - name: Install dependencies
         run: |
-          pip install atheris docling # And other deps
+          pip install --require-hashes -r tests/fuzz-requirements.txt
           pip install .
       - name: Run Fuzzer
         # Run for a limited time (e.g., 60 seconds) in CI to check for crashes
