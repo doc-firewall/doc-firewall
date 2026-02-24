@@ -1,0 +1,23 @@
+name: Fuzzing
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 2 * * *'  # Run daily at 2:30 AM
+permissions: read-all
+jobs:
+  atheris:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.1.7
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.1.0
+        with:
+          python-version: "3.10"
+      - name: Install dependencies
+        run: |
+          pip install --require-hashes -r tests/fuzz-requirements.txt
+          pip install .
+      - name: Run Fuzzer
+        # Run for a limited time (e.g., 60 seconds) in CI to check for crashes
+        run: |
+          python3 tests/fuzz_target.py -atheris_runs=10000

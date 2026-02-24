@@ -21,7 +21,7 @@
           <div class="hero-content">
             <div class="hero-badge">
               <span class="badge-dot"></span>
-              v0.1.0 &mdash; Now in Beta
+              {{ config.extra.version }} &mdash; Production Ready
             </div>
             <h1 class="hero-title">
               Secure Document Intake <span class="text-gradient">for AI Pipelines</span>
@@ -66,9 +66,9 @@
               <div class="code-body">
 <pre><code><span class="prompt">$</span> pip install doc-firewall
 <span class="dim">Collecting doc-firewall...</span>
-<span class="dim">Successfully installed doc-firewall-0.1.0</span>
+<span class="dim">Successfully installed doc-firewall-{{ config.extra.version_raw }}</span>
 
-<span class="prompt">$</span> doc-firewall scan untrusted_resume.pdf
+<span class="prompt">$</span> doc-firewall untrusted_resume.pdf
 
 <span class="output-info">&#9654; Scanning untrusted_resume.pdf (245 KB)</span>
 <span class="output-info">&#9654; Fast Scan ................ <span class="output-pass">DONE</span> (8ms)</span>
