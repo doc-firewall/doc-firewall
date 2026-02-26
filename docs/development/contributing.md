@@ -13,7 +13,7 @@ We welcome contributions to DocFirewall!
 ### Setup
 
 ```bash
-git clone https://github.com/your-org/doc-firewall.git
+git clone https://github.com/doc-firewall/doc-firewall.git
 cd doc-firewall
 pip install -e ".[dev]"
 pre-commit install
