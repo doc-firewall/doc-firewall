@@ -1,4 +1,4 @@
-# DocFirewall: Secure Document Intake for AI Pipelines
+# DocFirewall: Secure Document Intake for AI & RAG Pipelines
 
 [![PyPI version](https://badge.fury.io/py/doc-firewall.svg)](https://badge.fury.io/py/doc-firewall)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -6,7 +6,9 @@
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/doc-firewall/doc-firewall/badge)](https://securityscorecards.dev/viewer/?uri=github.com/doc-firewall/doc-firewall)
 
-**DocFirewall** is a high-performance, configurable security scanner designed to protect Large Language Model (LLM) pipelines and document processing systems from malicious uploads. It performs static analysis and heuristic scanning on **PDF** and **DOCX** files to neutralize threats **before** they reach your parser or inference engine.
+**DocFirewall** is the leading open-source security tool for **LLM document security** and **RAG pipelines**. It protects your AI applications from **prompt injection**, **malicious payloads**, and **data exfiltration** hidden in uploaded files.
+
+Designed for high-performance Python environments, this **secure document scanner** analyzes **PDF** and **DOCX** files to neutralize threats **before** they reach your vector database or inference engine.
 
 ---
 

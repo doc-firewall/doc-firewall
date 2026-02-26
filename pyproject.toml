@@ -8,7 +8,7 @@ version = "0.1.3"
 description = "LLM-aware document intake security scanning for PDF/DOCX"
 readme = "README.md"
 requires-python = ">=3.10"
-authors = [{name="DocFirewall Contributors"}]
+authors = [{name="G Mendes"}]
 license = "MIT"
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -46,8 +46,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/doc-firewall/doc-firewall"
-Documentation = "https://doc-firewall.github.io/doc-firewall/"
+Homepage = "https://www.docfirewall.com/"
+Documentation = "https://www.docfirewall.com/"
 Repository = "https://github.com/doc-firewall/doc-firewall"
 Issues = "https://github.com/doc-firewall/doc-firewall/issues"
 
