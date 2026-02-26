@@ -2,6 +2,16 @@
 
 {% block extrahead %}
   {{ super() }}
+  <meta name="description" content="Secure Document Intake for AI & RAG pipelines. Protect your LLMs from prompt injection, malicious payloads, and data exfiltration hidden in PDFs and DOCX files. Python library for document security.">
+  <meta name="keywords" content="LLM Security, RAG Security, Prompt Injection Defense, Secure Document Intake, Document Scanner, Document Scanning, Python, PDF Security, Malicious Document Detection, AI Firewall, DocFirewall">
+  <meta property="og:title" content="DocFirewall - Secure Document Intake for AI Pipelines">
+  <meta property="og:description" content="Protect your AI applications from hidden threats in documents. Detects prompt injections, malware, and more.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="{{ config.site_url }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="DocFirewall - Secure Document Intake for AI Pipelines">
+  <meta name="twitter:description" content="Protect your AI applications from hidden threats in documents. Detects prompt injections, malware, and more.">
+
   <link rel="apple-touch-icon" href="{{ base_url }}/assets/favicon.png">
   <link rel="icon" type="image/png" href="{{ base_url }}/assets/favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -24,10 +34,10 @@
               {{ config.extra.version }} &mdash; Production Ready
             </div>
             <h1 class="hero-title">
-              Secure Document Intake <span class="text-gradient">for AI Pipelines</span>
+              Secure Document Intake <span class="text-gradient">for AI & RAG Pipelines</span>
             </h1>
             <p class="hero-subtitle">
-              Protect your LLMs and RAG systems from prompt injection, malicious payloads, and data exfiltration hidden in PDFs and DOCX files.
+              The leading open-source <strong>LLM Security</strong> tool. Protect RAG systems from <strong>prompt injection</strong>, malicious payloads, and data exfiltration hidden in <strong>PDFs and DOCX</strong> files.
             </p>
             <div class="hero-cta">
               <a href="{{ base_url }}/getting-started/quickstart/" class="btn btn-primary">
