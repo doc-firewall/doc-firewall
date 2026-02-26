@@ -23,34 +23,12 @@ RUN apt-get update && apt-get install -y \
 # We accept the overhead here to ensure the image is "ready to scan"
 RUN freshclam || true
 
-# Copy project files
-COPY pyproject.toml README.md ./
-COPY src/ ./src/
-# Dataset is large and mounted at runtime, so we don't copy it into the image
-# COPY dataset/ ./dataset/
-COPY scripts/ ./scripts/
-
-# Copy pre-downloaded models to the default cache location
-# RapidOCR (torch) looks in ~/.cache/RapidOCR by default
-COPY models/ /root/.cache/RapidOCR/
-
-# Install the package and its dependencies
+# Install the package from PyPI
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -e .
+    pip install --no-cache-dir doc-firewall
 
-# Ensure models are in the site-packages directory where RapidOCR (torch) expects them
-# This handles the case where it ignores the user cache
-RUN python -c "import sys, shutil, os, site; \
-    src = '/root/.cache/RapidOCR'; \
-    # The log indicates direct usage of 'rapidocr' package dir \
-    dest_candidates = [ \
-        os.path.join(site.getsitepackages()[0], 'rapidocr', 'models'), \
-        os.path.join(site.getsitepackages()[0], 'rapidocr_torch', 'models'), \
-    ]; \
-    dest = dest_candidates[0]; \
-    print(f'Copying models from {src} to {dest}...'); \
-    os.makedirs(dest, exist_ok=True); \
-    shutil.copytree(src, dest, dirs_exist_ok=True)"
+# Models will be downloaded on first run or can be pre-cached here if needed
+# ENV RAPIDOCR_DISABLE_AUTO_DOWNLOAD=0
 
 # Set the entrypoint to the CLI
 ENTRYPOINT ["doc-firewall"]
