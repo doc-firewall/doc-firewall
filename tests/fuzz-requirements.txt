@@ -3,5 +3,6 @@ atheris==2.3.0 \
     --hash=sha256:f126da35cb246d611833ac217be543e4986b2b48564a51e5afac4ac6357e62d4
 # Note: docling and others would need their full tree hashed for strict compliance.
 # For now, pinning atheris is a good start as it's the direct dev dependency.
-docling==1.0.0 \
-    --hash=sha256:e682055655025732b146d66141a4a422030d952d7ce2030026210f54d193d5a5
+docling==2.75.0 \
+    --hash=sha256:1b0a77766e201e5e2d118e236c006f3814afcea2e13726fb3c7389d666a56622 \
+    --hash=sha256:6e156f0326edb6471fc076e978ac64f902f54aac0da13cf89df456013e377bcc
