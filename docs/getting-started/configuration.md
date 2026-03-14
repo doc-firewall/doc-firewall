@@ -39,6 +39,8 @@ You can load configuration from a YAML file or instantiate it in code.
 | `profile` | `str` | `"balanced"` | One of `balanced`, `strict`, `lenient`. Adjusts default thresholds. |
 | `enable_pdf` | `bool` | `True` | enable PDF parsing/scanning. |
 | `enable_docx` | `bool` | `True` | enable DOCX parsing/scanning. |
+| `enable_pptx` | `bool` | `True` | enable PPTX parsing/scanning. |
+| `enable_xlsx` | `bool` | `True` | enable XLSX parsing/scanning. |
 
 ## Threat Modules (T1-T9)
 
@@ -122,6 +124,22 @@ limits:
   max_mb: 10               # Max file size in MB
   max_pages: 1000          # PDF page limit
   parse_timeout_ms: 15000  # Parsing timeout
+  min_embedded_object_size_bytes: 20000  # Min size for embedded payload detection
+```
+
+## Advanced Threat Configuration
+
+### Customizing ATS & Ranking Keywords
+To prevent heuristic overfitting, developers can define custom ATS target keywords depending on the job domain or specific organizational ranking manipulation vulnerabilities:
+
+```python
+from doc_firewall import ScanConfig, Limits
+
+# Pass a custom list to detect domain-specific keyword stuffing
+custom_config = ScanConfig(
+    ats_keywords=["nursing", "medical", "registered", "certified", "healthcare"],
+    limits=Limits(min_embedded_object_size_bytes=50000)
+)
 ```
 
 ## False Positive Management

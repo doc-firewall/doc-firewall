@@ -99,8 +99,7 @@ class EmbeddedPayloadDetector(Detector):
                             severity=Severity.HIGH,
                             title="Large Hex Blob Detected in PDF",
                             explain=(
-                                "Found a massive hexadecimal string "
-                                "in PDF structure."
+                                "Found a massive hexadecimal string in PDF structure."
                             ),
                             evidence={"type": "hex_blob", "length": len(blob)},
                             module=self.name,

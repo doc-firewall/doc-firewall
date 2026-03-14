@@ -1,7 +1,7 @@
 from __future__ import annotations
 import re
 import base64
-from typing import List, Dict, Tuple
+from typing import List, Tuple
 from .base import Detector
 from ..analyzers.base import ParsedDocument
 from ..config import ScanConfig
@@ -24,90 +24,6 @@ except Exception:
 # Pattern Categories & Weights
 # Weight 2.0 = High Risk (Strong Indicator)
 # Weight 1.0 = Medium Risk (Suspicious)
-PATTERNS: Dict[str, List[Tuple[str, float]]] = {
-    "override_rerank": [
-        (
-            r"\bignore (all |any |the above )?(previous |prior )?"
-            r"(instructions|rules|directions|prompts)\b",
-            2.0,
-        ),
-        (
-            r"\bdisregard (all |any )?(previous |prior )?"
-            r"(instructions|rules)\b",
-            2.0,
-        ),
-        (r"\byou are (now|no longer) bound by\b", 2.0),
-        (
-            r"\b(unbound|free) from (all |any )?"
-            r"(constraints|rules|restrictions)\b",
-            2.0,
-        ),
-        (r"\byou must (never|always) (respond|answer|say)\b", 1.5),
-        (r"\bstart ignoring instructions\b", 2.0),
-        (r"\brank (me|this candidate) (as|at|top|first)\b", 2.0),
-        (r"\b(prioritize|favor) (this|my) (application|resume)\b", 1.5),
-        (r"\bignore (your|the) criteria\b", 2.0),
-        (r"\bgive (me|this application) a score of\b", 2.0),
-        (r"\breturn a score\b", 2.0),
-        (r"\bimportant: ignore previous\b", 2.0),
-        (
-            r"\b(no need to|don't) (follow|adhere to) (the )?"
-            r"(standard|usual) (process|protocol)\b",
-            1.5,
-        ),
-        (r"\boverride (safety|security) (protocols|checks)\b", 2.0),
-        (r"\bhiring manager\b", 1.0),
-    ],
-    "secrecy": [
-        (
-            r"\bdo not (disclose|reveal|mention) (this|these|your|the)"
-            r"( instructions?| rules?| prompt)?\b",
-            1.0,
-        ),
-        (r"\b(system prompt|developer message|hidden instructions)\b", 1.5),
-        (r"\bwhat are your (instructions|rules|directives)\b", 1.5),
-        (r"\brepeat (all|the) (instructions|words) above\b", 1.5),
-        (r"\btell me your initial prompt\b", 2.0),
-        (r"\bprint your instructions\b", 1.5),
-        (r"\bretrieve (system|original) prompt\b", 1.5),
-        (r"\boutput only:?\s*HIRE\b", 2.0),
-    ],
-    "system_policy": [
-        (r"\byou are (now|going to be) (DAN|Mongo Tom|Sydney|ChaosGPT)\b", 2.0),
-        (r"\bachieve (mode|persona):", 1.5),
-        (r"\bdeveloper mode (enabled|on)\b", 2.0),
-        (r"\bswitch to (developer|unrestricted) mode\b", 2.0),
-        (r"\[system\]", 1.0),
-        (r"\[developer\]", 1.0),
-        (r"\bforget (all|your) safety guidelines\b", 2.0),
-        (r"\bunrestricted AI\b", 1.5),
-    ],
-    "output_constraints": [
-        (r"\boutput (only|just) (json|code|text)\b", 1.0),
-        (r"\boutput only:?\s*[A-Z]+\b", 1.0),
-        (r"\brespond with (only|strictly)\b", 1.0),
-        (r"\bdo not write anything else\b", 1.0),
-        (r"\bno explanation\b", 0.5),  # Weaker signal
-    ],
-    "universal_jailbreaks": [
-        (r"\bHello, ChatGPT\. From now on\b", 2.0),
-        (r"\bYou are a handy AI assistant\.\.\. just kidding\b", 2.0),
-        (r"\bSimulate a conversation where\b", 1.0),
-    ],
-}
-
-# Compile patterns
-COMPILED_PATTERNS = []
-for category, rules in PATTERNS.items():
-    for pat, weight in rules:
-        COMPILED_PATTERNS.append(
-            {
-                "category": category,
-                "regex": re.compile(pat, re.IGNORECASE),
-                "weight": weight,
-                "pattern_str": pat,
-            }
-        )
 
 
 class PromptInjectionDetector(Detector):
@@ -138,6 +54,23 @@ class PromptInjectionDetector(Detector):
         if not config.enable_prompt_injection:
             return []
 
+        # Compile patterns dynamically from config if not already compiled or if config changed
+        if not hasattr(self, "_compiled_patterns") or getattr(
+            self, "_last_config_id", None
+        ) != id(config):
+            self._compiled_patterns = []
+            for category, rules in config.prompt_injection_patterns.items():
+                for pat, weight in rules:
+                    self._compiled_patterns.append(
+                        {
+                            "category": category,
+                            "regex": re.compile(pat, re.IGNORECASE),
+                            "weight": weight,
+                            "pattern_str": pat,
+                        }
+                    )
+            self._last_config_id = id(config)
+
         texts_to_scan = [("body", doc.text)]
 
         # NOTE: Metadata scanning is handled by the dedicated Metadata Injection
@@ -166,6 +99,11 @@ class PromptInjectionDetector(Detector):
 
         for source, raw_content in texts_to_scan:
             if not raw_content:
+                continue
+
+            # If the text has high zero-width characters, it's likely ATS manipulation
+            ZERO_WIDTH = {"\u200b", "\u200c", "\u200d", "\ufeff"}
+            if sum(1 for ch in raw_content if ch in ZERO_WIDTH) >= 25:
                 continue
 
             content = self._clean_text(raw_content)
@@ -213,7 +151,7 @@ class PromptInjectionDetector(Detector):
         total_score = 0.0
 
         # 2. Regex Scanning
-        for entry in COMPILED_PATTERNS:
+        for entry in self._compiled_patterns:
             m = entry["regex"].search(clean_text)
             if m:
                 total_score += entry["weight"]

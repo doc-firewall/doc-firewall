@@ -66,13 +66,20 @@ class TextObfuscationDetector(Detector):
             return findings
 
         # 1. Zero Width / Unicode Stealth
+        text_len = max(1, len(text))
         zw_count = sum(1 for ch in text if ch in ZERO_WIDTH)
-        if zw_count >= 25:
+        if (
+            zw_count >= 3
+            and (zw_count / text_len) > config.obfuscation_zw_threshold_ratio
+        ):
             signals.append("high_zero_width")
 
         # 2. Bidi
         bidi_count = sum(1 for ch in text if ch in BIDI_CONTROLS)
-        if bidi_count >= 2:
+        if (
+            bidi_count >= 1
+            and (bidi_count / text_len) >= 0.001
+        ):
             signals.append("high_bidi")
 
         # 3. High Entropy (Obfuscated/Encrypted blocks)
@@ -82,7 +89,7 @@ class TextObfuscationDetector(Detector):
         for chunk in chunks:
             if len(chunk) < 50:
                 continue
-            if _shannon_entropy(chunk) > 5.5:  # 5.5 is typical base64 cutoff
+            if _shannon_entropy(chunk) > config.obfuscation_entropy_threshold:
                 high_ent_chunks += 1
 
         if high_ent_chunks >= 2 or (
@@ -112,15 +119,15 @@ class TextObfuscationDetector(Detector):
             findings.append(
                 Finding(
                     threat_id=ThreatID.T3_OBFUSCATION,
-                    severity=Severity.HIGH,
-                    title="Obfuscation Detected (Multi-Signal)",
-                    explain=(
-                        f"Detected multiple obfuscation signals: "
-                        f"{', '.join(signals)}"
-                    ),
-                    evidence={"signals": signals, "count": len(signals)},
-                    module=self.name,
+                        severity=Severity.HIGH,
+                        title="Obfuscation Detected (Multi-Signal)",
+                        explain=(
+                            f"Detected multiple obfuscation signals: "
+                            f"{', '.join(signals)}"
+                        ),
+                        evidence={"signals": signals, "count": len(signals)},
+                        module=self.name,
+                    )
                 )
-            )
 
         return findings

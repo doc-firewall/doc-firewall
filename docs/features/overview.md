@@ -11,6 +11,8 @@ DocFirewall includes a suite of specialized detectors mapped to specific threat 
 ### Supported Formats
 - :material-file-pdf-box: **PDF**: Scans structure (objects, streams), content, and metadata.
 - :material-file-word-box: **DOCX**: Scans XML structure, relationships, macros, and embedded media.
+- :material-microsoft-powerpoint: **PPTX**: Scans presentation structure, slide relationships, macros, shapes, and embedded payloads.
+- :material-microsoft-excel: **XLSX**: Scans workbook structure, sheet relationships, macros, formulas (DDE), and embedded payloads.
 
 ## Threat Detection Modules
 
@@ -33,9 +35,13 @@ Protects AI models from manipulation.
 -   **Invisible Characters**: Zero-Width Joiners and Bidi control characters.
 
 ### 4. Infrastructure Protection (T6, T8)
--   **DoS (T6)**: Zip bombs, excessive page counts, recursion loops.
+-   **DoS (T6)**: Zip bombs (via expansion ratios and bounds), excessive page counts, recursion loops.
 -   **Metadata Injection (T8)**: Buffer overflows and syntax injection in metadata fields.
+-   **XXE Defense**: All Office parsers use `defusedxml` to block XML External Entities and mitigate SSRF attacks.
 
-### 5. Data Privacy
+### 5. Configurable Dataset-Agnostic Limits
+Instead of relying on hardcoded static heuristics, DocFirewall evaluates proportional risks dynamically using `Limits` (e.g. invisible-character ratio scaling instead of strict counts). Developers can selectively override any regex pattern, timeout, or byte-size limits seamlessly via `ScanConfig.limits`.
+
+### 6. Data Privacy
 -   **PII Detector**: Scans for SSN, Email, Phone, Credit Cards.
 -   **Secrets Detector**: Finds API Keys, Passwords, and Tokens.

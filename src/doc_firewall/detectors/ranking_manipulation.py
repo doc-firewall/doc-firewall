@@ -16,10 +16,11 @@ class RankingManipulationDetector(Detector):
             return []
         text = (doc.text or "").lower()
         tokens = [t for t in text.split() if t.isalpha() and len(t) > 2]
-        if len(tokens) < 200:
+        if len(tokens) < 50:
             return []
         counts = Counter(tokens)
         most_common, freq = counts.most_common(1)[0]
+        top_tokens = [k for k, v in counts.most_common(3)]
         ratio = freq / max(1, len(tokens))
         if ratio > 0.08:
             return [

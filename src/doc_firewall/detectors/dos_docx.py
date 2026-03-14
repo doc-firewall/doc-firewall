@@ -119,11 +119,10 @@ class DocxDoSDetector(Detector):
 
                 # Check 5: Nested Archive (Zip inside Zip)
                 for z in infolist:
-                    if z.filename.lower().endswith(
-                        (".zip", ".docx", ".xlsx", ".pptx", ".jar")
-                    ):
-                        findings.append(
-                            Finding(
+                    if z.filename.lower().endswith(".zip") or z.filename.lower().endswith(".jar"):
+                        if not any(folder in z.filename.lower() for folder in ["word/embeddings", "ppt/embeddings", "xl/embeddings"]):
+                            findings.append(
+                                Finding(
                                 threat_id=ThreatID.T6_DOS,
                                 severity=Severity.MEDIUM,
                                 title="Nested Archive Detected",

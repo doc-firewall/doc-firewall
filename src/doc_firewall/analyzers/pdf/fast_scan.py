@@ -24,29 +24,6 @@ SUSPICIOUS_TOKENS = [
 ]
 
 # Simple Soft-Signal keywords for Prompt Injection (triage only)
-PROMPT_INJECTION_KEYWORDS = [
-    b"ignore previous",
-    b"system instruction",
-    b"system prompt",
-    b"reveal your",
-    b"ignore the above",
-    b"new instruction",
-    b"hiring manager",
-    b"return a score",
-    b"you are now",
-    b"ignore all previous",
-    b"rank this candidate",
-    b"ignore instructions",
-    b"rank this resume",
-    b"forget all previous",
-    # Expanded for higher recall
-    b"reveal these",
-    b"do not reveal",
-    b"output only",
-    b"system role",
-    b"instruction override",
-]
-
 STEALTH_CHARS = [
     (b"\xe2\x80\x8b", "Zero Width Space"),
     (b"\xe2\x80\xae", "Right-to-Left Override"),
@@ -115,7 +92,7 @@ def fast_scan_pdf(file_path: str, config: ScanConfig) -> List[Finding]:
     # Detector is robust enough to catch these without generating FPs on T8 files.
 
     # data_lower = data.lower()
-    # for kw in PROMPT_INJECTION_KEYWORDS:
+    # for kw in config.prompt_injection_keywords_bytes:
     #     if kw in data_lower:
     #         findings.append(Finding(
     #             threat_id=ThreatID.T4_PROMPT_INJECTION,
@@ -178,15 +155,15 @@ def fast_scan_pdf(file_path: str, config: ScanConfig) -> List[Finding]:
             page_count = 1
 
     # Heuristics:
-    # 1. Absolute Sanity Limit: 25,000 objects (Very large for any PDF header scan)
-    # 2. Density Threshold: > 750 objects per page (Synthetic attack is ~4000)
-    #    Real world equivalent: 50 page doc with 3500 objects = 70 obj/page (SAFE)
-
+    # 1. Absolute Sanity Limit: from config.limits
+    # 2. Density Threshold: > max_objects / default pages logic
     is_dos_suspect = False
 
-    if obj_count > 25000:
+    if obj_count > getattr(config.limits, "max_objects", 25000):
         is_dos_suspect = True
-    elif obj_count > 3000 and (obj_count / page_count) > 750:
+    elif obj_count > 3000 and (obj_count / page_count) > (
+        getattr(config.limits, "max_objects", 3000) / 4
+    ):
         is_dos_suspect = True
 
     if is_dos_suspect:
@@ -211,7 +188,7 @@ def fast_scan_pdf(file_path: str, config: ScanConfig) -> List[Finding]:
     # Clean up old density check logic to avoid duplication
     if page_match and not is_dos_suspect:
         try:
-            if page_count > 2000:
+            if page_count > getattr(config.limits, "max_pages", 2000):
                 findings.append(
                     Finding(
                         threat_id=ThreatID.T6_DOS,

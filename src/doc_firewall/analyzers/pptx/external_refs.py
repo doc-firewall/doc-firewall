@@ -1,6 +1,6 @@
 from __future__ import annotations
 import zipfile
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 try:
     import defusedxml.ElementTree as ET  # noqa: F401
@@ -9,16 +9,21 @@ except ImportError as e:
         "defusedxml is required for safe XML parsing of untrusted documents. "
         "Install it with: pip install defusedxml"
     ) from e
+
 from ...report import Finding
 from ...enums import ThreatID, Severity
 from ...config import ScanConfig
 from ..base import ParsedDocument
 
-_RELS_FILES = ["_rels/.rels", "word/_rels/document.xml.rels"]
+# Relationship files to check in PPTX packages
+_RELS_PATHS = [
+    "_rels/.rels",
+    "ppt/_rels/presentation.xml.rels",
+]
 
 
 def _parse_rels_xml(xml_bytes: bytes) -> List[Dict[str, Any]]:
-    links = []
+    links: List[Dict[str, Any]] = []
     try:
         root = ET.fromstring(xml_bytes)
     except ET.ParseError:
@@ -29,35 +34,49 @@ def _parse_rels_xml(xml_bytes: bytes) -> List[Dict[str, Any]]:
         rtype = rel.attrib.get("Type", "")
         rid = rel.attrib.get("Id", "")
         if tm.lower() == "external" and tgt:
-            links.append({"id": rid, "type": rtype, "target": tgt, "target_mode": tm})
+            if not rtype.endswith("relationships/hyperlink"):
+                links.append(
+                    {"id": rid, "type": rtype, "target": tgt, "target_mode": tm}
+                )
     return links
 
 
-def detect_docx_external_refs(doc: ParsedDocument, config: ScanConfig) -> List[Finding]:
-    if doc.file_type != "docx":
+def detect_pptx_external_refs(doc: ParsedDocument, config: ScanConfig) -> List[Finding]:
+    """Detect external relationships (links/resources) in a PPTX file."""
+    if doc.file_type != "pptx":
         return []
-    findings = []
-    external_links = []
-    parse_errors = []
+    findings: List[Finding] = []
+    external_links: List[Dict[str, Any]] = []
+    parse_errors: List[str] = []
+
     try:
-        with zipfile.ZipFile(doc.file_path, "r") as z:
-            names = set(z.namelist())
-            for rel_path in _RELS_FILES:
+        with zipfile.ZipFile(doc.file_path, "r") as zf:
+            names = set(zf.namelist())
+            # Check known rels paths
+            for rel_path in _RELS_PATHS:
                 if rel_path in names:
                     try:
-                        external_links.extend(_parse_rels_xml(z.read(rel_path)))
+                        external_links.extend(_parse_rels_xml(zf.read(rel_path)))
                     except Exception as e:
                         parse_errors.append(f"{rel_path}: {e}")
+            # Also scan all slide .rels files
+            for name in names:
+                if name.startswith("ppt/slides/_rels/") and name.endswith(".rels"):
+                    try:
+                        external_links.extend(_parse_rels_xml(zf.read(name)))
+                    except Exception as e:
+                        parse_errors.append(f"{name}: {e}")
     except zipfile.BadZipFile:
         return findings
+
     if external_links:
         findings.append(
             Finding(
                 threat_id=ThreatID.T2_ACTIVE_CONTENT,
                 severity=Severity.MEDIUM,
-                title="DOCX contains external relationships (links/resources)",
+                title="PPTX contains external relationships (links/resources)",
                 explain=(
-                    "DOCX relationship files reference external targets. "
+                    "PPTX relationship files reference external targets. "
                     "External relationships can be used to load remote resources "
                     "or track access."
                 ),
@@ -65,7 +84,7 @@ def detect_docx_external_refs(doc: ParsedDocument, config: ScanConfig) -> List[F
                     "external_links": external_links,
                     "parse_errors": parse_errors,
                 },
-                module="docx.external_refs",
+                module="pptx.external_refs",
             )
         )
     return findings
