@@ -1,4 +1,4 @@
-# DocFirewall: Secure Document Intake for AI Pipelines
+# DocFirewall: Secure Document Intake for AI & RAG Pipelines
 
 [![PyPI version](https://badge.fury.io/py/doc-firewall.svg)](https://badge.fury.io/py/doc-firewall)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)

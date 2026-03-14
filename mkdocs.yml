@@ -1,5 +1,5 @@
 site_name: DocFirewall
-site_description: Secure Document Intake for AI Pipelines
+site_description: Secure Document Intake for AI & RAG Pipelines. Detect Prompt Injection, Malware, and Data Exfiltration in PDFs and DOCX.
 site_url: https://www.docfirewall.com/
 repo_url: https://github.com/doc-firewall/doc-firewall
 
