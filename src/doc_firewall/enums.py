@@ -18,9 +18,10 @@ class Severity(str, Enum):
 class ThreatID(str, Enum):
     T1_MALWARE = "T1_MALWARE"
     T2_ACTIVE_CONTENT = "T2_ACTIVE_CONTENT"
-    
+
     def __str__(self):
         return self.value
+
     T3_OBFUSCATION = "T3_OBFUSCATION"
     T4_PROMPT_INJECTION = "T4_PROMPT_INJECTION"
     T5_RANKING_MANIPULATION = "T5_RANKING_MANIPULATION"

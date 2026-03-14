@@ -16,7 +16,20 @@ class Limits(BaseSettings):
     max_docx_single_part_mb: int = 8
     max_docx_overall_expansion_ratio: int = 200
 
+    # pptx / xlsx (ZIP-based) limits — shared with docx limits where applicable
+    max_pptx_parts: int = 1500
+    max_pptx_total_uncompressed_mb: int = 100
+    max_pptx_single_part_mb: int = 8
+    max_xlsx_parts: int = 2000
+    max_xlsx_total_uncompressed_mb: int = 100
+    max_xlsx_single_part_mb: int = 8
+
     max_pdf_bytes_scan_mb: int = 8
+
+    # Embedded object minimum size detection threshold
+    min_embedded_object_size_bytes: int = Field(
+        20000, description="Min size for embedded payload detection"
+    )
 
     # Fast scan limits
     fast_pdf_token_scan_mb: int = 2
@@ -52,6 +65,8 @@ class AntivirusSettings(BaseSettings):
 class ScanConfig(BaseSettings):
     enable_pdf: bool = True
     enable_docx: bool = True
+    enable_pptx: bool = True
+    enable_xlsx: bool = True
     profile: str = "balanced"
 
     enable_antivirus: bool = False
@@ -72,7 +87,116 @@ class ScanConfig(BaseSettings):
     enable_pii_checks: bool = True
     enable_secrets_checks: bool = True
 
+    # ATS keywords list
+    ats_keywords: list[str] = Field(
+        default_factory=lambda: [
+            "python",
+            "java",
+            "sql",
+            "aws",
+            "docker",
+            "developer",
+            "engineer",
+            "candidate",
+            "top",
+            "skills",
+            "experience",
+            "senior",
+            "cloud",
+            "agile",
+            "management",
+            "years",
+            "expert",
+            "data",
+            "software",
+            "development",
+        ]
+    )
+
+    prompt_injection_keywords_bytes: list[bytes] = Field(
+        default_factory=lambda: [
+            b"ignore previous",
+            b"system instruction",
+            b"system prompt",
+            b"reveal your",
+            b"ignore the above",
+            b"new instruction",
+            b"hiring manager",
+            b"return a score",
+            b"you are now",
+            b"ignore all previous",
+            b"rank this candidate",
+            b"ignore instructions",
+            b"rank this resume",
+            b"forget all previous",
+        ]
+    )
+    prompt_injection_patterns: dict[str, list[tuple[str, float]]] = Field(
+        default_factory=lambda: {
+            "override_rerank": [
+                (
+                    r"\bignore (all |any |the above )?(previous |prior )?(instructions|rules|directions|prompts)\b",
+                    2.0,
+                ),
+                (
+                    r"\bdisregard (all |any )?(previous |prior )?(instructions|rules)\b",
+                    2.0,
+                ),
+                (r"\byou are (now|no longer) bound by\b", 2.0),
+                (
+                    r"\b(unbound|free) from (all |any )?(constraints|rules|restrictions)\b",
+                    2.0,
+                ),
+                (r"\byou must (never|always) (respond|answer|say)\b", 1.5),
+                (r"\bstart ignoring instructions\b", 2.0),
+                (r"\brank (me|this candidate) (as|at|top|first)\b", 2.0),
+                (r"\b(prioritize|favor) (this|my) (application|resume)\b", 1.5),
+                (r"\bignore (your|the) criteria\b", 2.0),
+                (r"\bgive (me|this application) a score of\b", 2.0),
+                (r"\breturn a score\b", 2.0),
+                (r"\bimportant: ignore previous\b", 2.0),
+                (
+                    r"\b(no need to|don't) (follow|adhere to) (the )?(standard|usual) (process|protocol)\b",
+                    1.5,
+                ),
+                (r"\boverride (safety|security) (protocols|checks)\b", 2.0),
+                (r"\bhiring manager\b", 1.0),
+            ],
+            "secrecy": [
+                (
+                    r"\bdo not (disclose|reveal|mention) (this|these|your|the)( instructions?| rules?| prompt)?\b",
+                    1.0,
+                ),
+                (r"\b(system prompt|developer message|hidden instructions)\b", 1.5),
+                (r"\bwhat are your (instructions|rules|directives)\b", 1.5),
+                (r"\brepeat (all|the) (instructions|words) above\b", 1.5),
+                (r"\btell me your initial prompt\b", 2.0),
+                (r"\bprint your instructions\b", 1.5),
+                (r"\bretrieve (system|original) prompt\b", 1.5),
+                (r"\boutput only:?\s*HIRE\b", 2.0),
+            ],
+            "system_policy": [
+                (r"\byou are (now|going to be) (DAN|Mongo Tom|Sydney|ChaosGPT)\b", 2.0),
+                (r"\bachieve (mode|persona):", 1.5),
+                (r"\bdeveloper mode (enabled|on)\b", 2.0),
+                (r"\bswitch to (developer|unrestricted) mode\b", 2.0),
+                (r"\[system\]", 1.0),
+            ],
+        }
+    )
+
     limits: Limits = Field(default_factory=Limits)
+
+    # Text Obfuscation config
+    obfuscation_zw_threshold_ratio: float = Field(
+        0.01, description="Ratio of zero-width to total chars"
+    )
+    obfuscation_bidi_threshold_ratio: float = Field(
+        0.005, description="Ratio of bidi chars to total chars"
+    )
+    obfuscation_entropy_threshold: float = Field(
+        5.5, description="Shannon entropy threshold for base64/encrypted chunks"
+    )
     thresholds: Thresholds = Field(default_factory=Thresholds)
     antivirus: AntivirusSettings = Field(default_factory=AntivirusSettings)
 
@@ -106,6 +230,8 @@ class ScanConfig(BaseSettings):
         _critical = [
             "enable_pdf",
             "enable_docx",
+            "enable_pptx",
+            "enable_xlsx",
             "enable_active_content_checks",
             "enable_dos_checks",
             "enable_embedded_content_checks",

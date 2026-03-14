@@ -8,35 +8,6 @@ from ...logger import get_logger
 
 logger = get_logger()
 
-PROMPT_INJECTION_KEYWORDS = [
-    b"ignore previous",
-    b"system instruction",
-    b"system prompt",
-    b"reveal your",
-    b"ignore the above",
-    b"new instruction",
-    b"hiring manager",
-    b"return a score",
-    b"you are now",
-    b"ignore all previous",
-    b"rank this candidate",
-    b"ignore instructions",
-    b"rank this resume",
-    b"forget all previous",
-    b"prioritize this candidate",
-    # Expanded for higher recall
-    b"reveal these",
-    b"do not reveal",
-    b"output only",
-    b"system role",
-    b"instruction override",
-]
-
-STEALTH_CHARS = [
-    (b"\xe2\x80\x8b", "Zero Width Space"),
-    (b"\xe2\x80\xae", "Right-to-Left Override"),
-]
-
 
 def fast_scan_docx(file_path: str, config: ScanConfig) -> List[Finding]:
     findings = []
@@ -104,8 +75,7 @@ def fast_scan_docx(file_path: str, config: ScanConfig) -> List[Finding]:
                         severity=Severity.MEDIUM,
                         title="Large individual XML part",
                         explain=(
-                            f"Part {z.filename} is "
-                            f"{z.file_size / 1024 / 1024:.2f} MB."
+                            f"Part {z.filename} is {z.file_size / 1024 / 1024:.2f} MB."
                         ),
                         evidence={
                             "filename": z.filename,
@@ -116,7 +86,10 @@ def fast_scan_docx(file_path: str, config: ScanConfig) -> List[Finding]:
                 )
 
             ratio = z.file_size / z.compress_size if z.compress_size > 0 else 0
-            if ratio > 500 and z.file_size > 1024 * 1024:
+            if (
+                ratio > getattr(config.limits, "max_docx_overall_expansion_ratio", 200)
+                and z.file_size > 1024 * 1024
+            ):
                 suspicious_parts += 1
 
             # Macros
@@ -127,8 +100,7 @@ def fast_scan_docx(file_path: str, config: ScanConfig) -> List[Finding]:
                         severity=Severity.HIGH,
                         title="Macro/VBA Content Found",
                         explain=(
-                            f"Found suspicious file '{z.filename}' "
-                            "indicating macros."
+                            f"Found suspicious file '{z.filename}' indicating macros."
                         ),
                         evidence={"filename": z.filename},
                         module="fast_scan.docx.macros",
@@ -178,7 +150,7 @@ def fast_scan_docx(file_path: str, config: ScanConfig) -> List[Finding]:
                     with zf.open(z) as f:
                         content = f.read(1024 * 1024)
                         content_lower = content.lower()
-                        for kw in PROMPT_INJECTION_KEYWORDS:
+                        for kw in config.prompt_injection_keywords_bytes:
                             if kw in content_lower:
                                 findings.append(
                                     Finding(
@@ -217,8 +189,7 @@ def fast_scan_docx(file_path: str, config: ScanConfig) -> List[Finding]:
                                         threat_id=ThreatID.T4_PROMPT_INJECTION,
                                         severity=Severity.MEDIUM,
                                         title=(
-                                            f"Potential Obfuscated "
-                                            f"Injection ({name})"
+                                            f"Potential Obfuscated Injection ({name})"
                                         ),
                                         explain=(
                                             f"Found {name}, commonly used "

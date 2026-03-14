@@ -11,3 +11,5 @@ class ParsedDocument:
     metadata: Dict[str, Any] = field(default_factory=dict)
     pdf: Optional[Dict[str, Any]] = None
     docx: Optional[Dict[str, Any]] = None
+    pptx: Optional[Dict[str, Any]] = None
+    xlsx: Optional[Dict[str, Any]] = None

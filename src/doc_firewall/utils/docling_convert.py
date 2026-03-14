@@ -2,8 +2,8 @@ from __future__ import annotations
 import os
 import zipfile
 import re
-from functools import lru_cache
 from typing import Any, Dict, Tuple
+from functools import lru_cache
 from ..logger import get_logger
 
 logger = get_logger()
@@ -29,19 +29,38 @@ except ImportError:
     HAS_DOCLING = False
 
 if HAS_DOCLING:
-
-    # @lru_cache(maxsize=1)  # Removed LRU cache to prevent pypdfium2 shutdown errors
+    _cached_converter = None
+    
     def _converter() -> DocumentConverter:
-        pipeline_options = PdfPipelineOptions()
-        pipeline_options.do_ocr = False
-        pipeline_options.do_table_structure = False
-        pipeline_options.table_structure_options.do_cell_matching = False
+        global _cached_converter
+        if _cached_converter is None:
+            import logging
+            logging.getLogger("RapidOCR").setLevel(logging.WARNING)
+            try:
+                # also silence underlying
+                logging.getLogger("rapidocr_onnxruntime").setLevel(logging.WARNING)
+            except Exception:
+                pass
+                
+            pipeline_options = PdfPipelineOptions()
+            pipeline_options.do_ocr = False
+            pipeline_options.do_table_structure = False
+            pipeline_options.table_structure_options.do_cell_matching = False
 
-        return DocumentConverter(
-            format_options={
-                PdfFormatOption: PdfFormatOption(pipeline_options=pipeline_options)
-            }
-        )
+            _cached_converter = DocumentConverter(
+                format_options={
+                    PdfFormatOption: PdfFormatOption(pipeline_options=pipeline_options)
+                }
+            )
+        return _cached_converter
+
+    import atexit
+    def _cleanup_converter():
+        global _cached_converter
+        if _cached_converter is not None:
+            _cached_converter = None
+            
+    atexit.register(_cleanup_converter)
 
 
 # Namespaces

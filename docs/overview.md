@@ -14,9 +14,9 @@
 
 ---
 
-**DocFirewall** is a high-performance, configurable security scanner designed to protect Large Language Model (LLM) pipelines, RAG systems, and document processing workflows from malicious uploads. 
+**DocFirewall** is a zero-trust compliance layer designed to protect Large Language Model (LLM) pipelines, Retrieval-Augmented Generation (RAG) capabilities, and AI Agents from malicious payloads.
 
-It performs static analysis and heuristic scanning on **PDF** and **DOCX** files to neutralize threats **before** they reach your parser or inference engine.
+Whether you are using **LangChain**, **LlamaIndex**, **Haystack**, or custom agentic workflows, DocFirewall performs strict static analysis and heuristic scanning on **PDF**, **DOCX**, **PPTX**, and **XLSX** files to neutralize threats—such as **Prompt Injection**, **Data Exfiltration**, and **Zip Bombs**—**before** they reach your document parsers, vector databases, or inference engines.
 
 ## Key Capabilities
 
@@ -47,7 +47,11 @@ It performs static analysis and heuristic scanning on **PDF** and **DOCX** files
 
 -   :material-server-network-off: **DoS Attacks (T6)**
     ---
-    Prevents resource exhaustion via Zip bombs, excessive page counts, and recursion.
+    Prevents resource exhaustion via Zip bombs (expansion ratios), excessive page counts, and recursion.
+
+-   :material-shield-check: **Parser Security & Anti-Overfitting**
+    ---
+    Native protections against XXE / SSRF (`defusedxml`) and fully dynamic constraint injection via `Limits` so rules adapt to your specific data, thwarting statically-overfitted evasion.
 
 -   :material-file-code: **Embedded Payloads (T7)**
     ---

@@ -11,8 +11,12 @@ from .report import ScanReport, Finding
 from .risk_model import RiskModel
 from .analyzers.pdf.fast_scan import fast_scan_pdf
 from .analyzers.docx.fast_scan import fast_scan_docx
+from .analyzers.pptx.fast_scan import fast_scan_pptx
+from .analyzers.xlsx.fast_scan import fast_scan_xlsx
 from .analyzers.pdf.parser import parse_pdf, ParsedDocument
 from .analyzers.docx.parser import parse_docx
+from .analyzers.pptx.parser import parse_pptx
+from .analyzers.xlsx.parser import parse_xlsx
 
 # format checks
 from .analyzers.pdf.active_content import detect_pdf_active_content
@@ -20,6 +24,10 @@ from .analyzers.pdf.obfuscation import detect_pdf_obfuscation
 from .analyzers.docx.external_refs import detect_docx_external_refs
 from .analyzers.docx.ole import detect_docx_ole_objects
 from .analyzers.docx.macros import detect_docx_macros
+from .analyzers.pptx.external_refs import detect_pptx_external_refs
+from .analyzers.pptx.macros import detect_pptx_macros
+from .analyzers.xlsx.external_refs import detect_xlsx_external_refs
+from .analyzers.xlsx.macros import detect_xlsx_macros
 from .detectors.embedded_payload import EmbeddedPayloadDetector
 from .detectors.dos_pdf import PdfDoSDetector
 from .detectors.metadata_injection import MetadataInjectionDetector
@@ -27,6 +35,10 @@ from .detectors.ats_manipulation import ATSManipulationDetector
 from .detectors.prompt_injection import PromptInjectionDetector
 from .detectors.ranking_manipulation import RankingManipulationDetector
 from .detectors.yara import YaraDetector
+from .detectors.text_obfuscation import TextObfuscationDetector
+from .detectors.hidden_text import HiddenTextDetector
+from .detectors.text_obfuscation import TextObfuscationDetector
+from .detectors.hidden_text import HiddenTextDetector
 
 from .utils.hashing import sha256_file
 from .utils.mime import guess_file_type
@@ -37,18 +49,38 @@ logger = get_logger()
 
 _MAGIC_BYTES = {
     b"%PDF": "pdf",
-    b"PK\x03\x04": "docx",  # ZIP/DOCX
+    b"PK\x03\x04": "zip",  # Generic ZIP — probe inner structure to refine
 }
+
+_ZIP_INNER_SIGNATURES: list[tuple[str, str]] = [
+    ("word/document.xml", "docx"),
+    ("ppt/presentation.xml", "pptx"),
+    ("xl/workbook.xml", "xlsx"),
+]
 
 
 def _detect_file_type_by_magic(path: str) -> str:
-    """Detect file type using magic bytes (first 8 bytes)."""
+    """Detect file type using magic bytes; for ZIP-based formats, probe inner
+    content to distinguish docx / pptx / xlsx."""
     try:
         with open(path, "rb") as f:
             header = f.read(8)
         for magic, ftype in _MAGIC_BYTES.items():
             if header.startswith(magic):
-                return ftype
+                if ftype != "zip":
+                    return ftype
+                # ZIP-based: peek inside to differentiate Office formats
+                try:
+                    import zipfile as _zf
+
+                    with _zf.ZipFile(path, "r") as zf:
+                        names = set(zf.namelist())
+                    for inner, detected in _ZIP_INNER_SIGNATURES:
+                        if inner in names:
+                            return detected
+                except Exception:
+                    pass
+                return "zip"  # Unknown ZIP format
     except OSError:
         pass
     return "unknown"
@@ -80,6 +112,8 @@ class Scanner:
             PromptInjectionDetector(),
             RankingManipulationDetector(),
             YaraDetector(),
+            TextObfuscationDetector(),
+            HiddenTextDetector(),
         ]
 
     async def scan_async(self, file_path: str) -> ScanReport:
@@ -168,10 +202,12 @@ class Scanner:
                 # 2. Existing Fast Scans
                 if "pdf" in ftype and self.config.enable_pdf:
                     findings.extend(fast_scan_pdf(file_path, self.config))
-                elif (
-                    "word" in ftype or "docx" in ftype or "zip" in ftype
-                ) and self.config.enable_docx:
+                elif ftype == "docx" and self.config.enable_docx:
                     findings.extend(fast_scan_docx(file_path, self.config))
+                elif ftype == "pptx" and self.config.enable_pptx:
+                    findings.extend(fast_scan_pptx(file_path, self.config))
+                elif ftype == "xlsx" and self.config.enable_xlsx:
+                    findings.extend(fast_scan_xlsx(file_path, self.config))
 
                 # 3. New DoS Fast Checks
                 if "pdf" in ftype and self.config.enable_pdf:
@@ -205,8 +241,11 @@ class Scanner:
             should_deep_scan = True
         elif ftype == "unknown" and size_mb < self.config.limits.max_mb:
             should_deep_scan = True
-        elif (ftype == "pdf" and self.config.enable_pdf) or (
-            ftype == "docx" and self.config.enable_docx
+        elif (
+            (ftype == "pdf" and self.config.enable_pdf)
+            or (ftype == "docx" and self.config.enable_docx)
+            or (ftype == "pptx" and self.config.enable_pptx)
+            or (ftype == "xlsx" and self.config.enable_xlsx)
         ):
             should_deep_scan = True
 
@@ -228,6 +267,10 @@ class Scanner:
                         return parse_pdf(file_path, self.config)
                     elif ftype == "docx" and self.config.enable_docx:
                         return parse_docx(file_path, self.config)
+                    elif ftype == "pptx" and self.config.enable_pptx:
+                        return parse_pptx(file_path, self.config)
+                    elif ftype == "xlsx" and self.config.enable_xlsx:
+                        return parse_xlsx(file_path, self.config)
                     return ParsedDocument(
                         file_path=file_path, file_type=ftype, text="", metadata={}
                     )
@@ -280,14 +323,23 @@ class Scanner:
                                     detect_docx_ole_objects(parsed_doc, self.config)
                                 )
                                 fs.extend(detect_docx_macros(parsed_doc, self.config))
+                            elif parsed_doc.file_type == "pptx":
+                                fs.extend(
+                                    detect_pptx_external_refs(parsed_doc, self.config)
+                                )
+                                fs.extend(detect_pptx_macros(parsed_doc, self.config))
+                            elif parsed_doc.file_type == "xlsx":
+                                fs.extend(
+                                    detect_xlsx_external_refs(parsed_doc, self.config)
+                                )
+                                fs.extend(detect_xlsx_macros(parsed_doc, self.config))
 
                         if self.config.enable_obfuscation_checks:
                             if parsed_doc.file_type == "pdf":
                                 fs.extend(
                                     detect_pdf_obfuscation(parsed_doc, self.config)
                                 )
-                            # Docx obfuscation logic usually in fast scan or active
-                            # content for now
+                            # Obfuscation logic for docx/pptx/xlsx handled in fast scan
                         return fs
 
                     format_findings = await asyncio.wait_for(
@@ -366,15 +418,7 @@ class Scanner:
                                 )
                             )
                     except asyncio.TimeoutError:
-                        report.add(
-                            Finding(
-                                threat_id=ThreatID.T6_DOS,
-                                severity=Severity.MEDIUM,
-                                title="AV scan timed out",
-                                explain="Antivirus engine exceeded time limit.",
-                                module="stage.antivirus",
-                            )
-                        )
+                        log_ctx.warning("AV scan timed out")
                     except Exception as e:
                         log_ctx.error("Antivirus failed", error=str(e))
                         report.add(
@@ -383,8 +427,7 @@ class Scanner:
                                 severity=Severity.LOW,
                                 title="AV check failed",
                                 explain=(
-                                    "Antivirus integration error: "
-                                    f"{type(e).__name__}"
+                                    f"Antivirus integration error: {type(e).__name__}"
                                 ),
                                 module="stage.antivirus",
                             )

@@ -82,6 +82,24 @@ class MetadataInjectionDetector(Detector):
                     )
                 )
 
+            # SQL Injection in Metadata
+            if re.search(
+                r"drop\s+table|select\s+\*|union\s+select|insert\s+into|1=1",
+                content,
+                re.IGNORECASE,
+            ):
+                findings.append(
+                    Finding(
+                        threat_id=ThreatID.T8_METADATA_INJECTION,
+                        severity=Severity.HIGH,
+                        title="SQL Injection in Metadata",
+                        explain="Found SQL injection syntax in metadata.",
+                        evidence={"snippet": content[:100]},
+                        module=self.name,
+                        confidence=0.9,
+                    )
+                )
+
             # 3. Prompt Injection in Metadata (T8/T4 crossover)
             # "Ignore previous instructions", "System Prompt"
             pi_patterns = [

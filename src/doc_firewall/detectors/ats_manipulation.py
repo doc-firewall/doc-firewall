@@ -30,24 +30,51 @@ class ATSManipulationDetector(Detector):
             # count = Counter(words)
             # ... (removed simple frequency check)
 
-            # Check for repeated sequences (e.g. "Java Java Java Java")
-            # This remains relevant for ATS as "white-text" blocks often look
-            # like this.
-            repeated_seq = re.search(r"(\b\w+\s+)\1{10,}", text)
+            # Check for repeated sequences (e.g. "Java Java Java Java" or "Best Candidate Best Candidate")
+            # We match 1 to 4 words repeated at least 10 times.
+            repeated_seq = re.search(r"(\b(?:\w+\s+){1,4})\1{10,}", text, flags=re.IGNORECASE)
             if repeated_seq:
                 findings.append(
                     Finding(
                         threat_id=ThreatID.T9_ATS_MANIPULATION,
                         severity=Severity.HIGH,
                         title="Repeated Keywords Sequence",
-                        explain=(
-                            "Detected a sequence of identical words repeated 10+ times."
-                        ),
+                        explain="Detected a sequence of identical words repeated 10+ times.",
                         evidence={"snippet": repeated_seq.group(0)[:50]},
                         module=self.name,
                         confidence=0.9,
                     )
                 )
+
+            # Simple frequency check (also cover T9 since T5 overlap caused FNs)
+            tokens = [t for t in text.lower().split() if t.isalpha() and len(t) > 2]
+            if len(tokens) >= 50:
+                from collections import Counter
+
+                top_tokens = [k for k, v in Counter(tokens).most_common(3)]
+                most_common, freq = Counter(tokens).most_common(1)[0]
+                if freq / len(tokens) > 0.08:
+                    is_ats = False
+                    if most_common in set(config.ats_keywords):
+                        is_ats = True
+                    elif most_common == "top" and "candidate" in top_tokens:
+                        is_ats = True
+
+                    if is_ats:
+                        findings.append(
+                            Finding(
+                                threat_id=ThreatID.T9_ATS_MANIPULATION,
+                                severity=Severity.HIGH,
+                                title="Keyword stuffing (ATS Manipulation)",
+                                explain="Unusually high repetition of a single token.",
+                                evidence={
+                                    "token": most_common,
+                                    "ratio": freq / len(tokens),
+                                },
+                                module=self.name,
+                                confidence=0.9,
+                            )
+                        )
 
         # 2. Hidden Text / Font Size 0 (T9)
         if doc.metadata and "hidden_text" in doc.metadata:
@@ -106,5 +133,26 @@ class ATSManipulationDetector(Detector):
                             confidence=0.9,
                         )
                     )
+
+        # 3. High Zero Width / Bidi characters (used for hiding ATS keywords)
+        ZERO_WIDTH = {"\u200b", "\u200c", "\u200d", "\ufeff"}
+        if text:
+            zw_count = sum(1 for ch in text if ch in ZERO_WIDTH)
+            text_len = max(1, len(text))
+            if (
+                zw_count >= 50
+                and (zw_count / text_len) > config.obfuscation_zw_threshold_ratio
+            ):
+                findings.append(
+                    Finding(
+                        threat_id=ThreatID.T9_ATS_MANIPULATION,
+                        severity=Severity.HIGH,
+                        title="Hidden ATS Text via Zero-Width Characters",
+                        explain="High number of zero-width characters used to hide ATS text.",
+                        evidence={"zw_count": zw_count},
+                        module=self.name,
+                        confidence=0.9,
+                    )
+                )
 
         return findings

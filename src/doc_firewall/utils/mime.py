@@ -8,4 +8,8 @@ def guess_file_type(path: str) -> str:
         return "pdf"
     if ext in [".docx", ".docm"]:
         return "docx"
+    if ext in [".pptx", ".pptm"]:
+        return "pptx"
+    if ext in [".xlsx", ".xlsm", ".xlsb"]:
+        return "xlsx"
     return "unknown"

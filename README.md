@@ -6,7 +6,9 @@
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/doc-firewall/doc-firewall/badge)](https://securityscorecards.dev/viewer/?uri=github.com/doc-firewall/doc-firewall)
 
-**DocFirewall** is a high-performance, configurable security scanner designed to protect Large Language Model (LLM) pipelines and document processing systems from malicious uploads. It performs static analysis and heuristic scanning on **PDF** and **DOCX** files to neutralize threats **before** they reach your parser or inference engine.
+**DocFirewall** is a high-performance, configurable security scanner designed to protect Large Language Model (LLM) pipelines, Retrieval-Augmented Generation (RAG) applications, and AI Agents from malicious payloads. 
+
+Whether you are using **LangChain**, **LlamaIndex**, **Haystack**, or custom agentic workflows, DocFirewall acts as a zero-trust compliance layer. It performs strict static analysis and heuristic scanning on **PDF**, **DOCX**, **PPTX**, and **XLSX** files to neutralize threats—such as **Prompt Injection**, **Data Exfiltration**, **XXE**, and **Zip Bombs**—**before** they reach your document parsers, vector databases, or inference engines. It provides out-of-the-box protection against vulnerabilities outlined in the **OWASP LLM Top 10** (e.g., LLM01: Prompt Injection).
 
 ---
 
@@ -74,11 +76,29 @@ Full documentation is available at [https://www.docfirewall.com](https://www.doc
 
 ## 💻 Usage
 
+### Securing RAG Pipelines (LangChain, LlamaIndex, LLaMA)
+Ensure malicious prompts or hidden instructions don't manipulate your LLMs by gating document loaders.
+
+```python
+from doc_firewall import scan
+from langchain_community.document_loaders import PyPDFLoader
+
+filepath = "upload/candidate_resume.pdf"
+report = scan(filepath)
+
+if report.verdict == "BLOCK":
+    raise ValueError(f"Malicious upload detected: {report.findings}")
+
+# Safe to proceed with LLM ingestion
+loader = PyPDFLoader(filepath)
+docs = loader.load()
+```
+
 ### Python API
 The primary interface is the `scan()` function, which acts as a synchronous wrapper around the async core.
 
 ```python
-from doc_firewall import scan, ScanConfig
+from doc_firewall import scan, ScanConfig, Limits
 
 # Default Configuration
 report = scan("resume.pdf")
@@ -93,6 +113,8 @@ else:
 config = ScanConfig(
     enable_pdf=True,
     enable_docx=True,
+    enable_pptx=True,
+    enable_xlsx=True,
     thresholds={"deep_scan_trigger": 0.4}
 )
 report = scan("contract.docx", config=config)
@@ -127,11 +149,17 @@ class ScanConfig:
     profile: str = "balanced"  # paranoid, balanced, fast
     enable_pdf: bool = True
     enable_docx: bool = True
+    enable_pptx: bool = True
+    enable_xlsx: bool = True
     ocr_enabled: bool = False  # Enable for image-based PDFs (slower)
     
-    # Risk Thresholds (0.0 - 1.0)
-    # Scores >= deep_scan_trigger will provoke parsing
-    # Scores >= blocking_threshold will return verdict BLOCK
+    # Easily override internal parsing or detection rules
+    limits: Limits = Limits(
+        max_file_size=50 * 1024 * 1024, # 50MB
+        obfuscation_zw_threshold_ratio=0.01,
+        # Defends against DoS zip bombs out-of-the-box
+        max_docx_total_uncompressed_mb=100
+    )
 ```
 
 ---

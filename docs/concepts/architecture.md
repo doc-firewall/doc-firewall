@@ -32,7 +32,7 @@ graph TD
 Documents enter via Python function calls (`scan()`), CLI, or REST API wrappers.
 
 ## 2. Pre-Flight
--   **Structure Check**: Verify PDF/DOCX magic bytes.
+-   **Structure Check**: Verify PDF/DOCX/PPTX/XLSX magic bytes.
 -   **Size Check**: Enforce `max_mb` limits.
 -   **Hashing**: Compute SHA256 for caching/logging.
 

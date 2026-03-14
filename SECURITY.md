@@ -11,8 +11,10 @@ Versions of doc-firewall project currently being supported with security updates
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability within this project, please report it via GitHub Issues.
+If you discover a security vulnerability within this project, please report it privately via through our [GitHub Security Advisories](https://github.com/doc-firewall/doc-firewall/security/advisories).
 
 We will get back to you within 48 hours.
+
+Please do not report security vulnerabilities through public GitHub issues.
 
 The Doc-Firewall team
