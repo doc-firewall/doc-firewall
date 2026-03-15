@@ -9,7 +9,7 @@ description = "LLM-aware document intake security scanning for PDF/DOCX/PPTX/XLS
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{name="G Mendes"}]
-license = "MIT"
+license = {text = "MIT"}
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
