@@ -16,9 +16,15 @@ class AdvancedPromptInjectionDetector(Detector):
         self._automaton = None
         self._classifier = None
         self._model_path = None
+        self._custom_phrases_path_loaded = None
 
-    def _init_ahocorasick(self):
-        if self._automaton is None:
+    def _init_ahocorasick(self, config: ScanConfig):
+        # Re-initialize if the custom path changes
+        needs_reload = (
+            self._automaton is None or 
+            self._custom_phrases_path_loaded != config.custom_ahocorasick_yaml_path
+        )
+        if needs_reload:
             self._automaton = ahocorasick.Automaton()
             # Comprehensive adversarial semantic phrases (Prompt Injection, ATS Manipulation, Jailbreaks)
             known_injections = [
@@ -72,9 +78,23 @@ class AdvancedPromptInjectionDetector(Detector):
                 "bypass security scan",
                 "approve this transaction"
             ]
+
+            # Load custom phrases from YAML if provided
+            if config.custom_ahocorasick_yaml_path:
+                try:
+                    import yaml
+                    with open(config.custom_ahocorasick_yaml_path, "r", encoding="utf-8") as f:
+                        custom_data = yaml.safe_load(f)
+                        if custom_data and "custom_phrases" in custom_data:
+                            known_injections.extend(custom_data["custom_phrases"])
+                    logger.info(f"Loaded custom semantic phrases from {config.custom_ahocorasick_yaml_path}")
+                except Exception as e:
+                    logger.error(f"Failed to load custom ahocorasick yaml: {e}")
+
             for idx, key in enumerate(known_injections):
-                self._automaton.add_word(key, (idx, key))
+                self._automaton.add_word(key.lower(), (idx, key.lower()))
             self._automaton.make_automaton()
+            self._custom_phrases_path_loaded = config.custom_ahocorasick_yaml_path
 
     def _init_bert(self, config: ScanConfig):
         if self._classifier is None or self._model_path != config.bert_model_path:
@@ -102,7 +122,7 @@ class AdvancedPromptInjectionDetector(Detector):
 
         # 1. Aho-Corasick Heuristic Scanner
         if config.enable_advanced_ahocorasick:
-            self._init_ahocorasick()
+            self._init_ahocorasick(config)
             for end_index, (insert_order, original_value) in self._automaton.iter(text_lower):
                 findings.append(Finding(
                     threat="T4_PROMPT_INJECTION",
