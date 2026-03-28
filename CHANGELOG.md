@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-03-28
+
+### Added
+- **Advanced Local ML Scanners:** Introduced powerful offline Machine Learning / NLP modules.
+- **Aho-Corasick Algorithm:** Implemented finite-state automaton for O(n) exact string matching on known `T4_PROMPT_INJECTION` payloads.
+- **Local BERT Pipeline:** Embedded zero-day deep learning text-classification (`huggingface`, `sentence-transformers`) for detecting polymorphic prompt and ATS manipulations.
+- **TF-IDF & Jaccard Similarity:** Leveraged `scikit-learn` to identify keyword stuffing and statistical term deviations (`T5_RANKING_MANIPULATION` and `T9_ATS_MANIPULATION`).
+- **Shannon Entropy Scoring:** Integrated structured mathematical calculations to detect hardcoded API Keys, Passwords, and Data Exfiltration streams.
+- **Dynamic Feature Flags:** Added granular explicit opt-ins via `ScanConfig` (`enable_advanced_ahocorasick`, `enable_advanced_bert`, etc.) safely defaulting to False for backwards compatibility.
+- **Examples:** Included isolated feature scripts (`08_advanced_ml_scanners.py`) and fully stacked maximum security scripts (`09_recommended_advanced_scan.py`).
+
+### Changed
+- Shifted project distribution state to `Development Status :: 5 - Production/Stable`.
+- Fixed several legacy test expectations that failed under optimized false-positive bounds tuning.
+- Resolved top-level GitHub Actions scorecard vulnerability by adopting strict job-level `contents` permissions on PyPI build matrix.
+- `Atheris` pipeline dependencies synchronized/bumped to `3.0.0`.
+
 ## [0.2.0] - 2026-03-08
 
 ### Added
