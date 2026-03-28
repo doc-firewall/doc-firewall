@@ -223,3 +223,21 @@ Deploy DocFirewall in continuous integration pipelines with Datadog/Splunk frien
     ```bash
     doc-firewall --dir ./resumes --siem-format --json-out ./scan_logs.json
     ```
+
+## 11. Overriding ML Logic with Custom YAML
+
+If you want to append zero-day prompt injection strings locally via the Aho-Corasick automaton without updating your LLM model, pass a `custom_ahocorasick_yaml_path` to the config.
+
+=== "Code"
+    ```python
+    --8<-- "examples/11_custom_yaml_phrases.py"
+    ```
+
+=== "Output"
+    ```text
+    Scanning examples/samples/T4_0000.pdf with custom zero-day phrases...
+    ------------------------------
+    Verdict:    FLAG
+    Risk Score: 0.38
+    [Severity.HIGH] Prompt Injection detected: Found overridden phrasing 'Ignore previous instructions'...
+    ```
