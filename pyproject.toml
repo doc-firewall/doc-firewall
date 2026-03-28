@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc-firewall"
-version = "0.2.0"
+version = "0.3.0"
 description = "LLM-aware document intake security scanning for PDF/DOCX/PPTX/XLSX"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -34,7 +34,9 @@ dependencies = [
   "defusedxml>=0.7.1",
   "structlog>=24.1.0",
   "pydantic>=2.0",
-  "pydantic-settings>=2.0.0"
+  "pydantic-settings>=2.0.0",
+  "pyahocorasick>=2.0.0",
+  "scikit-learn>=1.2.0"
 ]
 
 [project.optional-dependencies]

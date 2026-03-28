@@ -142,24 +142,24 @@ docker run --rm -v $(pwd):/app doc-firewall scripts/validate_with_doc_firewall.p
 
 ##  Configuration
 
-You can tune DocFirewall via `ScanConfig`:
+You can tune DocFirewall via `ScanConfig`. By default, DocFirewall uses lightning-fast regex and byte heuristics. You can also enable **Advanced Machine Learning Detectors** (v0.3.0+) which utilize completely local, offline models (Aho-Corasick, BERT, TF-IDF, and Shannon Entropy).
 
 ```python
-class ScanConfig:
-    profile: str = "balanced"  # paranoid, balanced, fast
-    enable_pdf: bool = True
-    enable_docx: bool = True
-    enable_pptx: bool = True
-    enable_xlsx: bool = True
-    ocr_enabled: bool = False  # Enable for image-based PDFs (slower)
+from doc_firewall import scan, ScanConfig
+
+config = ScanConfig(
+    profile="balanced",
     
-    # Easily override internal parsing or detection rules
-    limits: Limits = Limits(
-        max_file_size=50 * 1024 * 1024, # 50MB
-        obfuscation_zw_threshold_ratio=0.01,
-        # Defends against DoS zip bombs out-of-the-box
-        max_docx_total_uncompressed_mb=100
-    )
+    # Advanced NLP / ML Detectors (Disabled by default for maximum speed)
+    enable_advanced_ahocorasick=True,     # Ultra-fast O(n) known injection phrase matching
+    enable_advanced_bert=True,            # Local zero-day Prompt Injection classification
+    enable_advanced_tfidf=True,           # Context drift and keyword stuffing via Jaccard/TF-IDF
+    enable_credential_entropy=True,       # Detects hardcoded APIs/Keys via Shannon Entropy
+    
+    # Optional: Point to a pre-downloaded offline HuggingFace model folder
+    # bert_model_path="/mnt/secure_volume/models/deberta-v3"
+)
+report = scan("resume.pdf", config=config)
 ```
 
 ---
