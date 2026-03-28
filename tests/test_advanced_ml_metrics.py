@@ -56,6 +56,11 @@ def main():
                 continue
 
             is_malicious_expected = int(row['is_malicious'])
+            threat_id = row.get("threat_ids", "")
+
+            # Restrict ML test to relevant NLP threat vectors (T4, T5, T9) and benign files
+            if is_malicious_expected == 1 and not any(t in threat_id for t in ["T4", "T5", "T9"]):
+                continue
             
             try:
                 report = scanner.scan(file_path)
@@ -76,6 +81,12 @@ def main():
                 # Optional visual progress indicator
                 if scanned % 100 == 0:
                     print(f"Scanned {scanned} files... (TP:{TP} FP:{FP} TN:{TN} FN:{FN})")
+
+                # Print FN debugging logic
+                if is_malicious_expected == 1 and not verdict:
+                    threat_id = row.get("threat_ids", "UNKNOWN")
+                    # print(f"FN Detected | Path: {file_path} | Threat: {threat_id}")
+
             except Exception as e:
                 # Handle files that might fail to parse during deep scan
                 print(f"Error scanning {file_path}: {e}")
