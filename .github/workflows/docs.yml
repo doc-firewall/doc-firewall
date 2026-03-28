@@ -11,8 +11,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.4.1
-      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.1.0
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.4.1
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v5.1.0
         with:
           python-version: 3.x
       - run: pip install "mkdocs<2.0.0" mkdocs-material mkdocs-minify-plugin "mkdocstrings[python]"
