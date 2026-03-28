@@ -29,6 +29,12 @@ How to serialize the `ScanReport` to JSON, suitable for logging or returning res
 python examples/03_json_output.py
 ```
 
+### 8. [Advanced ML Scanners](08_advanced_ml_scanners.py)
+How to disable traditional scanners and enable the sophisticated local Machine Learning modules (BERT, TF-IDF, Aho-Corasick) for deeper heuristic threat detection.
+```bash
+python examples/08_advanced_ml_scanners.py
+```
+
 ## Advanced Topics available in tests/scripts
 - **Antivirus Integration**: See `scripts/test_antivirus_docker.py`.
 - **Bulk Scanning**: See `scripts/validate_with_doc_firewall.py`.
