@@ -26,20 +26,29 @@ classifiers = [
 dependencies = [
   "docling>=1.0.0",
   "numpy>=1.24.0",
-  "sentence-transformers>=2.2.0",
-  "pandas>=2.0.0",
-  "matplotlib>=3.7.0",
   "python-docx>=1.1.0",
   "openpyxl>=3.1.0",
   "defusedxml>=0.7.1",
   "structlog>=24.1.0",
   "pydantic>=2.0",
-  "pydantic-settings>=2.0.0",
-  "pyahocorasick>=2.0.0",
-  "scikit-learn>=1.2.0"
+  "pydantic-settings>=2.0.0"
 ]
 
 [project.optional-dependencies]
+ml = [
+  "sentence-transformers>=2.2.0",
+  "pyahocorasick>=2.0.0",
+  "scikit-learn>=1.2.0"
+]
+bench = [
+  "pandas>=2.0.0",
+  "matplotlib>=3.7.0"
+]
+api = [
+  "fastapi>=0.100.0",
+  "uvicorn[standard]>=0.20.0",
+  "python-multipart>=0.0.6"
+]
 dev = [
     "build",
     "twine",

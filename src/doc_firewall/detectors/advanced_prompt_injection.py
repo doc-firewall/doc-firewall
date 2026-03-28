@@ -1,5 +1,4 @@
 import logging
-import ahocorasick
 from typing import List
 
 from .base import Detector
@@ -8,6 +7,12 @@ from ..config import ScanConfig
 from ..analyzers.base import ParsedDocument
 
 logger = logging.getLogger(__name__)
+
+try:
+    import ahocorasick
+    _HAS_AHOCORASICK = True
+except ImportError:
+    _HAS_AHOCORASICK = False
 
 class AdvancedPromptInjectionDetector(Detector):
     name = "advanced_prompt_injection"
@@ -24,7 +29,7 @@ class AdvancedPromptInjectionDetector(Detector):
             self._automaton is None or 
             self._custom_phrases_path_loaded != config.custom_ahocorasick_yaml_path
         )
-        if needs_reload:
+        if needs_reload and _HAS_AHOCORASICK:
             self._automaton = ahocorasick.Automaton()
             # Comprehensive adversarial semantic phrases (Prompt Injection, ATS Manipulation, Jailbreaks)
             known_injections = [
@@ -123,14 +128,15 @@ class AdvancedPromptInjectionDetector(Detector):
         # 1. Aho-Corasick Heuristic Scanner
         if config.enable_advanced_ahocorasick:
             self._init_ahocorasick(config)
-            for end_index, (insert_order, original_value) in self._automaton.iter(text_lower):
-                findings.append(Finding(
-                    threat="T4_PROMPT_INJECTION",
-                    severity="HIGH",
-                    confidence=1.0,
-                    description=f"Aho-Corasick detected known prompt injection phrase: '{original_value}'"
-                ))
-                break # Single detection is enough to flag
+            if self._automaton:
+                for end_index, (insert_order, original_value) in self._automaton.iter(text_lower):
+                    findings.append(Finding(
+                        threat="T4_PROMPT_INJECTION",
+                        severity="HIGH",
+                        confidence=1.0,
+                        description=f"Aho-Corasick detected known prompt injection phrase: '{original_value}'"
+                    ))
+                    break # Single detection is enough to flag
 
         # 2. Local BERT Deep Scanner
         if config.enable_advanced_bert:

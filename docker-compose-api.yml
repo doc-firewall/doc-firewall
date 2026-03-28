@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  doc-firewall-api:
+    build: 
+      context: .
+      # Assuming you will modify your Dockerfile to `pip install doc-firewall[api,ml]`
+    image: doc-firewall-api:latest
+    container_name: doc-firewall-api
+    ports:
+      - "8000:8000"
+    command: uvicorn doc_firewall.api:app --host 0.0.0.0 --port 8000

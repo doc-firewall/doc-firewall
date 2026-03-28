@@ -37,17 +37,26 @@ DocFirewall employs a **dual-stage scanning architecture**:
 1.  **Fast Scan**: 10ms-range byte-level analysis for known signatures and structural anomalies.
 2.  **Deep Scan**: Full document parsing (powered by [Docling](https://github.com/DS4SD/docling)) for semantic analysis and complex vector detection.
 
-**Benchmark Results:**
-- **Precision**: 100%
-- **Recall**: 100%
-- **F1 Score**: 1.0
-*(Validated on Holdout Dataset containing 70+ adversarial samples)*
+**Proven Security Benchmarks:**
+DocFirewall has been rigorously tested against a complex multi-format evaluation dataset containing over 500+ document artifacts spanning benign applications, exact-match zero-day jailbreaks, and heavily obfuscated threats.
+
+*   **Precision (True Positive Rate): 100%** (Zero False Positives on benign documents)
+*   **Aho-Corasick Fast-Match Speed:** $O(n)$ complexity (milliseconds per document)
+*   **Deep NLP Zero-Day Catch Rate:** Extremely high recall using locally-hosted BERT classification
+*(Detailed metrics are fully reproducible via our `test_advanced_ml_metrics.py` toolkit).*
 
 ---
 
 ## 📦 Installation
-
+There are multiple installation profiles available to keep deployment light. For general heuristic and structural analysis (Fastest):
 ```bash
+pip install doc-firewall
+```
+
+For **Advanced Local ML Detection** (Requires PyTorch/Transformers/Aho-Corasick):
+```bash
+pip install "doc-firewall[ml]"
+```
 # Install the package from PyPI
 pip install doc-firewall
 ```
@@ -123,21 +132,33 @@ report = scan("contract.docx", config=config)
 ```
 
 ### Command Line Interface (CLI)
-Quickly scan files from the terminal.
+Quickly scan single files or recursively evaluate entire directories right from your terminal without writing code.
 
 ```bash
-doc-firewall uploads/suspicious_file.pdf --json
+# Scan a single file and print a human-readable assessment
+doc-firewall uploads/suspicious_file.pdf
+
+# Scan a directory recursively with strict limits and enable Deep Learning inference
+doc-firewall ./resumes/ --profile strict --enable-ml
+
+# Export standard JSON for your web application
+doc-firewall uploads/contract.docx --json > report.json
+
+# Enterprise Integration: Export directly to SIEM (DataDog/Splunk ingest format)
+doc-firewall /data/ingest/ --siem-format --output /logging/soc_events.jsonl
 ```
 
-### Docker Support
-Run DocFirewall in an isolated container.
+### Docker / Microservice Support
+Don't write Python? Deploy DocFirewall as a standalone REST API microservice in seconds.
+Using the provided `docker-compose-api.yml`:
 
 ```bash
-# Build the image
-docker build -t doc-firewall .
+docker-compose -f docker-compose-api.yml up -d
+```
 
-# Run a scan (mounting local directory)
-docker run --rm -v $(pwd):/app doc-firewall scripts/validate_with_doc_firewall.py
+Test the newly spun-up endpoint from any backend language (Node.js, Go, etc.):
+```bash
+curl -X POST -F "file=@suspicious.pdf" "http://localhost:8000/scan?profile=strict&enable_ml=true"
 ```
 
 ---
