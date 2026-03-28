@@ -5,6 +5,7 @@ from .base import Detector
 from ..report import Finding
 from ..config import ScanConfig
 from ..analyzers.base import ParsedDocument
+from ..enums import ThreatID, Severity
 
 logger = logging.getLogger(__name__)
 
@@ -131,10 +132,11 @@ class AdvancedPromptInjectionDetector(Detector):
             if self._automaton:
                 for end_index, (insert_order, original_value) in self._automaton.iter(text_lower):
                     findings.append(Finding(
-                        threat="T4_PROMPT_INJECTION",
-                        severity="HIGH",
+                        threat_id=ThreatID.T4_PROMPT_INJECTION,
+                        severity=Severity.HIGH,
                         confidence=1.0,
-                        description=f"Aho-Corasick detected known prompt injection phrase: '{original_value}'"
+                        title="Known Prompt Injection Pattern",
+                        explain=f"Aho-Corasick detected known prompt injection phrase: '{original_value}'"
                     ))
                     break # Single detection is enough to flag
 
@@ -155,10 +157,11 @@ class AdvancedPromptInjectionDetector(Detector):
                         
                         if score > 0.8 and ("INJECTION" in label or label == "LABEL_1"):
                             findings.append(Finding(
-                                threat="T4_PROMPT_INJECTION",
-                                severity="HIGH",
+                                threat_id=ThreatID.T4_PROMPT_INJECTION,
+                                severity=Severity.HIGH,
                                 confidence=round(float(score), 2),
-                                description=f"Local BERT model detected zero-day semantic prompt injection (Label: {label})"
+                                title="Zero-Day Semantic Prompt Injection",
+                                explain=f"Local BERT model detected zero-day semantic prompt injection (Label: {label})"
                             ))
                 except Exception as e:
                     logger.warning(f"BERT Inference failed: {e}")

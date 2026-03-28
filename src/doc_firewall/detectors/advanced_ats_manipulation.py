@@ -5,6 +5,7 @@ from .base import Detector
 from ..report import Finding
 from ..config import ScanConfig
 from ..analyzers.base import ParsedDocument
+from ..enums import ThreatID, Severity
 
 logger = logging.getLogger(__name__)
 
@@ -60,10 +61,11 @@ class AdvancedATSNLPDetector(Detector):
             # Usually tf-idf maxes out around 0.6-0.8 for normal documents. If it hits 1.0 continuously, it's stuffing.
             if top_score > 0.95:
                 findings.append(Finding(
-                    threat="T9_ATS_MANIPULATION",
-                    severity="HIGH",
+                    threat_id=ThreatID.T9_ATS_MANIPULATION,
+                    severity=Severity.HIGH,
                     confidence=round(float(top_score), 2),
-                    description=f"TF-IDF detected severe keyword stuffing drift. Top anomalous phrase: '{top_phrase}'"
+                    title="Keyword Stuffing Drift",
+                    explain=f"TF-IDF detected severe keyword stuffing drift. Top anomalous phrase: '{top_phrase}'"
                 ))
 
             # Jaccard calculations for context deviation
@@ -85,10 +87,11 @@ class AdvancedATSNLPDetector(Detector):
                 # If more than 20% of consecutive sentences are 80% identical, that's ranking spam!
                 if float(high_jaccard_count) / len(sentences) > 0.2:
                      findings.append(Finding(
-                        threat="T5_RANKING_MANIPULATION",
-                        severity="MEDIUM",
+                        threat_id=ThreatID.T5_RANKING_MANIPULATION,
+                        severity=Severity.MEDIUM,
                         confidence=0.85,
-                        description="Jaccard similarity detected abnormally high repetition of context/role text."
+                        title="Semantic Repetition",
+                        explain="Jaccard similarity detected abnormally high repetition of context/role text."
                     ))
 
         except Exception as e:

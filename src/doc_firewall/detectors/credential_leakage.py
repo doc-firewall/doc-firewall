@@ -8,6 +8,7 @@ from .base import Detector
 from ..report import Finding
 from ..config import ScanConfig
 from ..analyzers.base import ParsedDocument
+from ..enums import ThreatID, Severity
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +36,11 @@ class CredentialLeakageDetector(Detector):
             # High entropy (> 4.8 on a tight alphabet, or > 5.5 overall) strongly indicates a key
             if entropy > 5.5:
                 findings.append(Finding(
-                    threat="T8_METADATA_INJECTION", # Can map to Data Leakage/Exfiltration
-                    severity="HIGH",
+                    threat_id=ThreatID.T8_METADATA_INJECTION, # Can map to Data Leakage/Exfiltration
+                    severity=Severity.HIGH,
                     confidence=0.90,
-                    description=f"High Shannon entropy ({entropy:.2f}) detected in string block; potential credential leakage or hardcoded key."
+                    title="High Entropy String Block",
+                    explain=f"High Shannon entropy ({entropy:.2f}) detected in string block; potential credential leakage or hardcoded key."
                 ))
                 # Only flag once per document to avoid alert fatigue
                 break
