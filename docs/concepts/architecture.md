@@ -45,3 +45,7 @@ Scans the raw binary stream without parsing the document structure.
 If the file passes Fast Scan, it is parsed into a standardized logical representation (text blocks, key-value metadata).
 -   **Parsers**: `docling` (default), `pypdf`, `python-docx`.
 -   **OCR**: Optionally enabled for scanned PDFs using RapidOCR.
+
+## 5. Offline Intelligence (Zero-API Execution)
+All processing—including advanced NLP chunking, deep learning BERT sequence classification (Zero-Day Prompt Injection), Aho-Corasick automaton generation, and mathematical metrics (Shannon Entropy) runs **strictly locally on CPU/GPU architecture**. 
+There are **zero external API calls**, protecting PII immediately by default and maintaining strict data residency compliance without relying on third-party LLMs like OpenAI or Anthropic.

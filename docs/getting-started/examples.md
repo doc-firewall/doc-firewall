@@ -186,3 +186,21 @@ Comprehensive example covering Prompt Injection, ATS Manipulation, and Active Co
 
 <!-- Updated examples paths to use bundled samples -->
 
+
+## 7. Advanced ML Scanners Isolation (Offline AI)
+
+In testing architectures or when performing data forensics, you might want to bypass standard parsers and evaluate a document specifically using the offline Deep Learning modules (BERT/Aho-Corasick/TF-IDF) without any API calls.
+
+=== "Code"
+    ```python
+    --8<-- "examples/08_advanced_ml_scanners.py"
+    ```
+
+## 8. Recommended Production Scan (Defense-in-Depth)
+
+The most comprehensive setup turning on every standard check + the new advanced offline AI/ML capabilities side-by-side to guarantee Zero-Day detection speeds natively and locally.
+
+=== "Code"
+    ```python
+    --8<-- "examples/09_recommended_advanced_scan.py"
+    ```
