@@ -28,7 +28,7 @@ class AdvancedATSNLPDetector(Detector):
         if not config.enable_advanced_tfidf:
             return findings
 
-        full_text = doc.plain_text or ""
+        full_text = getattr(doc, 'text', '') or ""
         if len(full_text.split()) < 50:
             return findings
 

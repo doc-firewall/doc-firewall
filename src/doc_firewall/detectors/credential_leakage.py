@@ -19,7 +19,7 @@ class CredentialLeakageDetector(Detector):
         if not config.enable_credential_entropy:
             return findings
 
-        full_text = doc.plain_text or ""
+        full_text = getattr(doc, 'text', '') or ""
         if not full_text:
             return findings
 

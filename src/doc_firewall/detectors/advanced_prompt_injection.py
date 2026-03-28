@@ -119,7 +119,7 @@ class AdvancedPromptInjectionDetector(Detector):
 
     def run(self, doc: ParsedDocument, config: ScanConfig) -> List[Finding]:
         findings = []
-        full_text = doc.plain_text or ""
+        full_text = getattr(doc, 'text', '') or ""
         text_lower = full_text.lower()
         
         if not full_text.strip():
