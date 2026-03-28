@@ -11,6 +11,8 @@ ENV RAPIDOCR_DISABLE_AUTO_DOWNLOAD=1
 # Install system dependencies that might be needed by docling and document processing
 # Also installing ClamAV for antivirus scanning capability
 RUN apt-get update && apt-get install -y \
+    gcc \
+    python3-dev \
     libmagic1 \
     libglib2.0-0 \
     libgl1 \
