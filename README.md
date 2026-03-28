@@ -8,6 +8,8 @@
 
 **DocFirewall** is a high-performance, configurable security scanner designed to protect Large Language Model (LLM) pipelines, Retrieval-Augmented Generation (RAG) applications, and AI Agents from malicious payloads. 
 
+> 🔒 **100% Local & Air-gapped (Zero API):** DocFirewall runs completely locally on your infrastructure. **Zero data is ever sent to external APIs or third-party LLMs.** Secure your AI pipeline without compromising data privacy or compliance.
+
 Whether you are using **LangChain**, **LlamaIndex**, **Haystack**, or custom agentic workflows, DocFirewall acts as a zero-trust compliance layer. It performs strict static analysis and heuristic scanning on **PDF**, **DOCX**, **PPTX**, and **XLSX** files to neutralize threats—such as **Prompt Injection**, **Data Exfiltration**, **XXE**, and **Zip Bombs**—**before** they reach your document parsers, vector databases, or inference engines. It provides out-of-the-box protection against vulnerabilities outlined in the **OWASP LLM Top 10** (e.g., LLM01: Prompt Injection).
 
 ---
