@@ -34,7 +34,7 @@ dependencies = [
 
 [project.optional-dependencies]
 ml = [
-  "docling>=2.0.0",
+  "docling>=2.84.0",
   "sentence-transformers>=3.0.0",
   "pyahocorasick>=2.0.0",
   "scikit-learn>=1.2.0",
