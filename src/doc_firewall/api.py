@@ -11,7 +11,7 @@ from .config import ScanConfig
 app = FastAPI(
     title="DocFirewall Microservice",
     description="Drop-in REST API wrapper for DocFirewall zero-trust document scanning.",
-    version="0.3.0"
+    version="0.3.1"
 )
 
 @app.post("/scan")
