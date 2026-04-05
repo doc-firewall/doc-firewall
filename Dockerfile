@@ -28,6 +28,7 @@ RUN freshclam || true
 
 # Copy project files
 COPY pyproject.toml README.md ./
+COPY requirements-docker.txt ./
 COPY src/ ./src/
 # Dataset is large and mounted at runtime, so we don't copy it into the image
 # COPY dataset/ ./dataset/
@@ -40,7 +41,8 @@ COPY models/ /root/.cache/RapidOCR/
 # Install the package and its dependencies with ML + API extensions
 # Note: Scorecard triggers on 'pip install' without hashes. For local builds, 
 # you can use '--require-hashes' with a requirements.txt if needed.
-RUN pip install --no-cache-dir -e .[ml,api]
+RUN pip install --no-cache-dir --require-hashes -r requirements-docker.txt
+RUN pip install --no-cache-dir --no-deps -e .
 
 # Ensure models are in the site-packages directory where RapidOCR (torch) expects them
 # This handles the case where it ignores the user cache
