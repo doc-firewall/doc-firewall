@@ -37,8 +37,10 @@ from .detectors.ranking_manipulation import RankingManipulationDetector
 from .detectors.yara import YaraDetector
 from .detectors.text_obfuscation import TextObfuscationDetector
 from .detectors.hidden_text import HiddenTextDetector
-from .detectors.text_obfuscation import TextObfuscationDetector
-from .detectors.hidden_text import HiddenTextDetector
+
+from .detectors.advanced_prompt_injection import AdvancedPromptInjectionDetector
+from .detectors.advanced_ats_manipulation import AdvancedATSNLPDetector
+from .detectors.credential_leakage import CredentialLeakageDetector
 
 from .utils.hashing import sha256_file
 from .utils.mime import guess_file_type
@@ -114,6 +116,9 @@ class Scanner:
             YaraDetector(),
             TextObfuscationDetector(),
             HiddenTextDetector(),
+            AdvancedPromptInjectionDetector(),
+            AdvancedATSNLPDetector(),
+            CredentialLeakageDetector(),
         ]
 
     async def scan_async(self, file_path: str) -> ScanReport:

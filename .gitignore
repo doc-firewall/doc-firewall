@@ -75,6 +75,7 @@ models/
 paper_artifacts/
 scripts/
 run_benchmark.sh
+run_benchmark_local.sh
 Dockerfile
 docker-compose.yml
 
@@ -85,3 +86,5 @@ docker-compose.yml
 
 
 .pypirc
+test-env/
+logs/

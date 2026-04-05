@@ -186,3 +186,58 @@ Comprehensive example covering Prompt Injection, ATS Manipulation, and Active Co
 
 <!-- Updated examples paths to use bundled samples -->
 
+
+## 7. Advanced ML Scanners Isolation (Offline AI)
+
+In testing architectures or when performing data forensics, you might want to bypass standard parsers and evaluate a document specifically using the offline Deep Learning modules (BERT/Aho-Corasick/TF-IDF) without any API calls.
+
+=== "Code"
+    ```python
+    --8<-- "examples/08_advanced_ml_scanners.py"
+    ```
+
+## 8. Recommended Production Scan (Defense-in-Depth)
+
+The most comprehensive setup turning on every standard check + the new advanced offline AI/ML capabilities side-by-side to guarantee Zero-Day detection speeds natively and locally.
+
+=== "Code"
+    ```python
+    --8<-- "examples/09_recommended_advanced_scan.py"
+    ```
+
+## 9. Docker Microservice & REST API
+
+Run DocFirewall as a standalone service returning strict JSON verdicts.
+
+=== "Command"
+    ```bash
+    docker-compose -f docker-compose-api.yml up -d
+    curl -X POST http://localhost:8000/scan -F "file=@resume.pdf"
+    ```
+
+## 10. CLI with SIEM-ready JSON Logs
+
+Deploy DocFirewall in continuous integration pipelines with Datadog/Splunk friendly output.
+
+=== "Command"
+    ```bash
+    doc-firewall --dir ./resumes --siem-format --json-out ./scan_logs.json
+    ```
+
+## 11. Overriding ML Logic with Custom YAML
+
+If you want to append zero-day prompt injection strings locally via the Aho-Corasick automaton without updating your LLM model, pass a `custom_ahocorasick_yaml_path` to the config.
+
+=== "Code"
+    ```python
+    --8<-- "examples/11_custom_yaml_phrases.py"
+    ```
+
+=== "Output"
+    ```text
+    Scanning examples/samples/T4_0000.pdf with custom zero-day phrases...
+    ------------------------------
+    Verdict:    FLAG
+    Risk Score: 0.38
+    [Severity.HIGH] Prompt Injection detected: Found overridden phrasing 'Ignore previous instructions'...
+    ```

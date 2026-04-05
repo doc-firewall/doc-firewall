@@ -81,6 +81,14 @@ class ScanConfig(BaseSettings):
     enable_metadata_checks: bool = True  # T8
     enable_ats_manipulation_checks: bool = True  # T9
 
+    # Advanced Machine Learning / Heuristic Detectors
+    enable_advanced_ahocorasick: bool = False
+    enable_advanced_bert: bool = False
+    enable_advanced_tfidf: bool = False
+    enable_credential_entropy: bool = False
+    bert_model_path: str = "ProtectAI/deberta-v3-base-prompt-injection-v2"
+    custom_ahocorasick_yaml_path: Optional[str] = None
+
     # False Positive Reductions
     allow_hidden_watermarks: bool = True
 
