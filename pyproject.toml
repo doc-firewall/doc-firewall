@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc-firewall"
-version = "0.3.1"
+version = "0.3.2"
 description = "LLM-aware document intake security scanning for PDF/DOCX/PPTX/XLSX"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10, <3.13"
 authors = [{name="G Mendes"}]
 license = {text = "MIT"}
 classifiers = [
@@ -19,12 +19,11 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
     "Topic :: Security",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-  "docling>=1.0.0",
+  "docling>=2.0.0",
   "numpy>=1.24.0",
   "python-docx>=1.1.0",
   "openpyxl>=3.1.0",
