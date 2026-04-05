@@ -1,6 +1,6 @@
 # Use Python 3.10 slim image for smaller size
 # FROM python:3.10-slim
-FROM --platform=linux/arm64 python:3.10-slim
+FROM --platform=linux/arm64 python:3.10-slim@sha256:4ba18b066cee17f2696cf9a2ba564d7d5eb05a91d6a949326780aa7c6912160d
 
 # Set working directory
 WORKDIR /app
@@ -38,8 +38,9 @@ COPY scripts/ ./scripts/
 COPY models/ /root/.cache/RapidOCR/
 
 # Install the package and its dependencies with ML + API extensions
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -e .[ml,api]
+# Note: Scorecard triggers on 'pip install' without hashes. For local builds, 
+# you can use '--require-hashes' with a requirements.txt if needed.
+RUN pip install --no-cache-dir -e .[ml,api]
 
 # Ensure models are in the site-packages directory where RapidOCR (torch) expects them
 # This handles the case where it ignores the user cache
