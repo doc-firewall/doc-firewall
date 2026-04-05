@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc-firewall"
-version = "0.3.0"
+version = "0.3.1"
 description = "LLM-aware document intake security scanning for PDF/DOCX/PPTX/XLSX"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -36,18 +36,21 @@ dependencies = [
 
 [project.optional-dependencies]
 ml = [
-  "sentence-transformers>=2.2.0",
+  "sentence-transformers>=3.0.0",
   "pyahocorasick>=2.0.0",
-  "scikit-learn>=1.2.0"
+  "scikit-learn>=1.2.0",
+  "torch>=2.4.0",
+  "torchvision>=0.19.0"
 ]
 bench = [
   "pandas>=2.0.0",
   "matplotlib>=3.7.0"
 ]
 api = [
-  "fastapi>=0.100.0",
-  "uvicorn[standard]>=0.20.0",
-  "python-multipart>=0.0.6"
+  "fastapi>=0.110.0",
+  "uvicorn[standard]>=0.30.0",
+  "python-multipart>=0.0.20",
+  "requests>=2.32.3"
 ]
 dev = [
     "build",
