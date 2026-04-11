@@ -5,6 +5,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/doc-firewall/doc-firewall/badge)](https://securityscorecards.dev/viewer/?uri=github.com/doc-firewall/doc-firewall)
+[![PyPI Downloads](https://img.shields.io/pypi/dm/doc-firewall.svg)](https://pypistats.org/packages/doc-firewall)
 
 **DocFirewall** is a high-performance, configurable security scanner designed to protect Large Language Model (LLM) pipelines, Retrieval-Augmented Generation (RAG) applications, and AI Agents from malicious payloads. 
 
