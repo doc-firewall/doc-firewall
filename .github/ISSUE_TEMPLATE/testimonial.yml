@@ -1,0 +1,41 @@
+name: Submit a Testimonial / "Used By"
+description: Let us know you are using Doc-Firewall in production!
+title: "Used By: [Company/Project Name]"
+labels: ["testimonial"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for using Doc-Firewall! We love hearing how the community is securing their AI and RAG pipelines. 
+        Please fill out the form below to be added to our "Used By" list.
+  - type: input
+    id: company_name
+    attributes:
+      label: Company or Project Name
+      description: What is the name of your organization or project?
+      placeholder: e.g., Acme Corp
+    validations:
+      required: true
+  - type: input
+    id: link
+    attributes:
+      label: Website or Repository Link
+      description: Where can people learn more about your project?
+      placeholder: https://www.acme.com
+    validations:
+      required: true
+  - type: textarea
+    id: use_case
+    attributes:
+      label: How are you using Doc-Firewall?
+      description: A brief sentence or two about how Doc-Firewall secures your application.
+      placeholder: We use Doc-Firewall to scan resumes before feeding them into our RAG recruitment pipeline...
+    validations:
+      required: true
+  - type: checkboxes
+    id: consent
+    attributes:
+      label: Consent
+      options:
+        - label: I grant permission to display my company/project name and (optional) logo in the Doc-Firewall README.
+          required: true
