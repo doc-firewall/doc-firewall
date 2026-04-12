@@ -188,6 +188,13 @@ report = scan("resume.pdf", config=config)
 
 ---
 
+## 🏢 Used By
+
+Are you using **Doc-Firewall** in production? We'd love to hear from you and feature you on our growing list of secure deployments!
+[Please fill out our short Testimonial Issue Template](https://github.com/doc-firewall/doc-firewall/issues/new?template=testimonial.yml) to let us know.
+
+---
+
 ## 📜 License
 MIT
 
