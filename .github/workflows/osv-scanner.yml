@@ -1,0 +1,42 @@
+name: OSV-Scanner
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "pyproject.toml"
+      - "requirements*.txt"
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    - cron: '0 9 * * 4'  # Every Thursday at 09:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write  # Upload SARIF to GitHub Security tab
+  actions: read
+
+jobs:
+  osv-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Run OSV-Scanner
+        uses: google/osv-scanner-action/osv-scanner-action@2dd748adc21b7dfee5e5b93f8e2c1cd98773ab6a # v2.0.2
+        with:
+          scan-args: |-
+            --lockfile=pyproject.toml
+            --format=sarif
+            --output=osv-results.sarif
+            ./
+        continue-on-error: true  # Report findings without blocking CI
+
+      - name: Upload OSV-Scanner results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@c10b8064de6f491fea524254123dbe5e09572f13 # v4
+        if: always()
+        with:
+          sarif_file: osv-results.sarif
+          category: osv-scanner
