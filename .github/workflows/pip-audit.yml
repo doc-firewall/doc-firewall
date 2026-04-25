@@ -32,15 +32,14 @@ jobs:
           python-version: "3.11"
 
       - name: Install pip-audit
-        run: pip install pip-audit==2.9.0
+        run: pip install --require-hashes -r scripts/requirements-pip-audit.txt
 
-      - name: Run pip-audit on core dependencies
+      - name: Run pip-audit on pinned dependencies
         id: audit
         run: |
-          pip-audit --requirement <(pip-compile --no-header pyproject.toml -o - 2>/dev/null || pip install . --dry-run 2>/dev/null | grep "Would install" | tr ' ' '\n' | grep '==' | sed 's/>=/==/') \
-            --output json --format json > audit_results.json 2>&1 || true
-          pip install ".[ml]" --dry-run -q 2>/dev/null || true
-          pip-audit . --output json --format json > audit_results.json || echo '{"vulnerabilities": []}' > audit_results.json
+          # Audit the hash-pinned production requirements file (requirements-docker.txt)
+          pip-audit -r requirements-docker.txt --output json --format json > audit_results.json \
+            || echo '{"vulnerabilities": []}' > audit_results.json
 
       - name: Report vulnerabilities
         run: |

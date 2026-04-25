@@ -33,7 +33,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install Bandit
-        run: pip install bandit[sarif]==1.8.3
+        run: pip install --require-hashes -r scripts/requirements-bandit.txt
 
       - name: Run Bandit
         # Scan src/ and tests/ — skip B101 (assert in tests is expected)
