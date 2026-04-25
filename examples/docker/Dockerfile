@@ -23,9 +23,9 @@ RUN apt-get update && apt-get install -y \
 # We accept the overhead here to ensure the image is "ready to scan"
 RUN freshclam || true
 
-# Install the package from PyPI
-RUN python3 -m pip install --no-cache-dir --upgrade pip && \
-    python3 -m pip install --no-cache-dir doc-firewall
+# Install the package from PyPI using a hash-pinned lockfile
+COPY requirements.txt .
+RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 
 # Models will be downloaded on first run or can be pre-cached here if needed
 # ENV RAPIDOCR_DISABLE_AUTO_DOWNLOAD=0

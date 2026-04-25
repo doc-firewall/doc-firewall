@@ -14,10 +14,10 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install dependencies
-        run: |
-          pip install --require-hashes -r tests/fuzz-requirements.txt
-          python3 -m pip install .
+        run: pip install --require-hashes -r tests/fuzz-requirements.txt
       - name: Run Fuzzer
         # Run for a limited time (e.g., 60 seconds) in CI to check for crashes
-        run: |
-          python3 tests/fuzz_target.py -atheris_runs=10000
+        # PYTHONPATH=src avoids 'pip install .' which cannot be hash-pinned
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: python3 tests/fuzz_target.py -atheris_runs=10000
