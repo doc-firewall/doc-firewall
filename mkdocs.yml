@@ -1,7 +1,8 @@
 site_name: DocFirewall
-site_description: Secure Document Intake for AI & RAG Pipelines. Detect Prompt Injection, Malware, and Data Exfiltration in PDFs and DOCX.
+site_description: "Open-source Python library for secure document intake. Detects prompt injection, malware, and data exfiltration in PDF, DOCX, PPTX, and XLSX files before they reach your LLM or RAG pipeline."
 site_url: https://www.docfirewall.com/
 repo_url: https://github.com/doc-firewall/doc-firewall
+copyright: "Copyright &copy; 2024–2026 DocFirewall. MIT Licensed."
 
 hooks:
   - docs/hooks.py
@@ -49,6 +50,11 @@ theme:
 
 plugins:
   - search
+  - social:
+      enabled: !ENV [CI, false]
+      cards_layout_options:
+        background_color: "#1e1e2e"
+        color: "#ffffff"
   - mkdocstrings:
       handlers:
         python:

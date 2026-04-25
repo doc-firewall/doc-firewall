@@ -1,3 +1,8 @@
+---
+title: Quick Start — Scan Your First Document in 5 Minutes
+description: Scan a PDF or DOCX for prompt injection and malware with DocFirewall in minutes. Includes sync and async API examples, ScanReport attributes, and YAML configuration.
+---
+
 # Quick Start
 
 Get up and running with DocFirewall in under 5 minutes.

@@ -1,3 +1,8 @@
+---
+title: Installation — Install DocFirewall via pip or Docker
+description: Install DocFirewall with pip install doc-firewall. Requires Python 3.10+. Supports Docker and optional ClamAV integration for T1 malware scanning.
+---
+
 # Installation
 
 DocFirewall can be installed via pip or used as a Docker container.

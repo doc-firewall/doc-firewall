@@ -1,0 +1,42 @@
+name: OSV-Scanner
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "pyproject.toml"
+      - "requirements*.txt"
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    - cron: '0 9 * * 4'  # Every Thursday at 09:00 UTC
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  # Used for push and scheduled scans — uploads SARIF to GitHub Security tab
+  osv-scan-scheduled:
+    if: ${{ github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: read
+      actions: read
+      security-events: write  # Required for SARIF upload inside the reusable workflow
+    uses: "google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@3d5827dbebf8a3f7ba681e730a8a1b116e8ebddd" # v2.3.5
+    with:
+      scan-args: |-
+        -r
+        ./
+
+  # Used for pull requests — reports new vulnerabilities introduced by the PR
+  osv-scan-pr:
+    if: ${{ github.event_name == 'pull_request' }}
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    uses: "google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@3d5827dbebf8a3f7ba681e730a8a1b116e8ebddd" # v2.3.5
+    with:
+      scan-args: |-
+        -r
+        ./

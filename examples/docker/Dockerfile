@@ -1,5 +1,5 @@
 # Use Python 3.10 slim image for smaller size
-FROM python:3.10-slim
+FROM python:3.10-slim@sha256:26fc00cf5fd6f57ded62e50e27cd3fec9843a3d0f31243c04debb3aba952d9c6
 
 # Set working directory
 WORKDIR /app
@@ -23,9 +23,9 @@ RUN apt-get update && apt-get install -y \
 # We accept the overhead here to ensure the image is "ready to scan"
 RUN freshclam || true
 
-# Install the package from PyPI
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir doc-firewall
+# Install the package from PyPI using a hash-pinned lockfile
+COPY requirements.txt .
+RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 
 # Models will be downloaded on first run or can be pre-cached here if needed
 # ENV RAPIDOCR_DISABLE_AUTO_DOWNLOAD=0

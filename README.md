@@ -7,6 +7,8 @@
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/doc-firewall/doc-firewall/badge)](https://securityscorecards.dev/viewer/?uri=github.com/doc-firewall/doc-firewall)
 [![PyPI Downloads](https://img.shields.io/pypi/dm/doc-firewall.svg)](https://pypistats.org/packages/doc-firewall)
 
+🌐 **Documentation & Full Guide:** **[https://www.docfirewall.com](https://www.docfirewall.com)**
+
 **DocFirewall** is a high-performance, configurable security scanner designed to protect Large Language Model (LLM) pipelines, Retrieval-Augmented Generation (RAG) applications, and AI Agents from malicious payloads. 
 
 > 🔒 **100% Local & Air-gapped (Zero API):** DocFirewall runs completely locally on your infrastructure. **Zero data is ever sent to external APIs or third-party LLMs.** Secure your AI pipeline without compromising data privacy or compliance.
@@ -82,7 +84,17 @@ A candidate submits a PDF with hidden text:
 
 ## 📚 Documentation
 
-Full documentation is available at [https://www.docfirewall.com](https://www.docfirewall.com).
+Full documentation, API reference, configuration guide, and benchmarking results are available at **[https://www.docfirewall.com](https://www.docfirewall.com)**.
+
+| Resource | Link |
+| :--- | :--- |
+| Overview & Threat Model | [docfirewall.com/overview](https://www.docfirewall.com/overview/) |
+| Installation Guide | [docfirewall.com/getting-started/installation](https://www.docfirewall.com/getting-started/installation/) |
+| Quick Start | [docfirewall.com/getting-started/quickstart](https://www.docfirewall.com/getting-started/quickstart/) |
+| Python API Reference | [docfirewall.com/api/python](https://www.docfirewall.com/api/python/) |
+| CLI Reference | [docfirewall.com/api/cli](https://www.docfirewall.com/api/cli/) |
+| Docker Reference | [docfirewall.com/api/docker](https://www.docfirewall.com/api/docker/) |
+| Changelog | [docfirewall.com/changelog](https://www.docfirewall.com/changelog/) |
 
 ---
 

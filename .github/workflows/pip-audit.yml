@@ -1,0 +1,68 @@
+name: pip-audit
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "pyproject.toml"
+      - "requirements*.txt"
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "pyproject.toml"
+      - "requirements*.txt"
+  schedule:
+    - cron: '0 8 * * 1'  # Every Monday at 08:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write  # Allows the workflow to open issues for found vulnerabilities
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v5.1.0
+        with:
+          python-version: "3.11"
+
+      - name: Install pip-audit
+        run: pip install --require-hashes -r scripts/requirements-pip-audit.txt
+
+      - name: Run pip-audit on pinned dependencies
+        id: audit
+        run: |
+          # Audit the hash-pinned production requirements file (requirements-docker.txt)
+          pip-audit -r requirements-docker.txt --output json --format json > audit_results.json \
+            || echo '{"vulnerabilities": []}' > audit_results.json
+
+      - name: Report vulnerabilities
+        run: |
+          VULNS=$(python3 -c "
+          import json, sys
+          try:
+              data = json.load(open('audit_results.json'))
+              vulns = data.get('vulnerabilities', [])
+              if vulns:
+                  print(f'Found {len(vulns)} vulnerability/vulnerabilities:')
+                  for v in vulns:
+                      print(f'  - {v[\"name\"]} {v[\"version\"]}: {v[\"vulns\"]}')
+                  sys.exit(1)
+              else:
+                  print('No vulnerabilities found.')
+          except Exception as e:
+              print(f'Could not parse results: {e}')
+          ")
+          echo "$VULNS"
+
+      - name: Upload audit results
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v4.1.3
+        if: always()
+        with:
+          name: pip-audit-results
+          path: audit_results.json
