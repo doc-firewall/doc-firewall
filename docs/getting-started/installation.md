@@ -21,6 +21,12 @@ To install DocFirewall locally, use pip.
 pip install doc-firewall
 ```
 
+For Advanced Local ML Detection (Requires PyTorch/Transformers/Aho-Corasick):
+
+```bash
+pip install "doc-firewall[ml]"
+```
+
 !!! tip "Virtual Environments"
     It is highly recommended to use a virtual environment to avoid dependency conflicts.
     ```bash
