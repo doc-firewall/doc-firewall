@@ -16,7 +16,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --require-hashes -r tests/fuzz-requirements.txt
-          pip install .
+          python3 -m pip install .
       - name: Run Fuzzer
         # Run for a limited time (e.g., 60 seconds) in CI to check for crashes
         run: |

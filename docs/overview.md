@@ -1,3 +1,8 @@
+---
+title: Overview — DocFirewall Capabilities & Threat Coverage
+description: Overview of DocFirewall's 9 threat vectors (T1–T9), multi-layered defense architecture, and benchmark performance. Covers prompt injection, malware, obfuscation, and ATS manipulation detection.
+---
+
 # DocFirewall
 
 <div align="center" markdown="1">

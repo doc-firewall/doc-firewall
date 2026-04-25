@@ -1,3 +1,8 @@
+---
+title: Threat Model — T1 to T9 Document Threat Taxonomy
+description: DocFirewall's threat taxonomy covers 9 attack vectors: T1 Malware, T2 Active Content, T3 Obfuscation, T4 Prompt Injection, T5 Ranking Manipulation, T6 DoS, T7 Embedded Payloads, T8 Metadata Injection, and T9 ATS Manipulation.
+---
+
 # Threat Model
 
 DocFirewall maps its defenses to specific Threat IDs (T-Codes).

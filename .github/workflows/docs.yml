@@ -15,5 +15,5 @@ jobs:
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v5.1.0
         with:
           python-version: 3.x
-      - run: pip install "mkdocs<2.0.0" mkdocs-material mkdocs-minify-plugin "mkdocstrings[python]"
+      - run: python3 -m pip install "mkdocs<2.0.0" mkdocs-material mkdocs-minify-plugin "mkdocstrings[python]"
       - run: mkdocs gh-deploy --force

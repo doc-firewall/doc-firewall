@@ -2,21 +2,139 @@
 
 {% block extrahead %}
   {{ super() }}
-  <meta name="description" content="Secure Document Intake for AI & RAG pipelines. Protect your LLMs from prompt injection, malicious payloads, and data exfiltration hidden in PDFs and DOCX files. Python library for document security.">
-  <meta name="keywords" content="LLM Security, RAG Security, Prompt Injection Defense, Secure Document Intake, Document Scanner, Document Scanning, Python, PDF Security, Malicious Document Detection, AI Firewall, DocFirewall">
-  <meta property="og:title" content="DocFirewall - Secure Document Intake for AI Pipelines">
-  <meta property="og:description" content="Protect your AI applications from hidden threats in documents. Detects prompt injections, malware, and more.">
+
+  {# ── Per-page or global description ── #}
+  {% if page and page.meta and page.meta.description %}
+    {% set _desc = page.meta.description %}
+  {% else %}
+    {% set _desc = "DocFirewall is an open-source Python library that scans PDF, DOCX, PPTX, and XLSX files for prompt injection, malware, and data exfiltration — protecting LLMs and RAG pipelines before threats reach your AI." %}
+  {% endif %}
+
+  {# ── Per-page or global title ── #}
+  {% if page and page.meta and page.meta.title %}
+    {% set _title = page.meta.title ~ " | DocFirewall" %}
+  {% elif page and page.is_homepage %}
+    {% set _title = "DocFirewall — Secure Document Intake for LLMs & RAG Pipelines | Python Library" %}
+  {% else %}
+    {% set _title = (page.title if page else "DocFirewall") ~ " | DocFirewall" %}
+  {% endif %}
+
+  {# ── Canonical URL ── #}
+  {% if page %}
+    {% set _canonical = config.site_url.rstrip('/') ~ '/' ~ page.url %}
+  {% else %}
+    {% set _canonical = config.site_url %}
+  {% endif %}
+
+  <meta name="description" content="{{ _desc }}">
+  <meta name="keywords" content="DocFirewall, LLM security, RAG security, prompt injection defense, secure document intake, document scanner, PDF security, malicious document detection, AI firewall, Python security library, LangChain security, LlamaIndex security, BERT document scanning, ClamAV Python">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="{{ _canonical }}">
+
+  {# ── Open Graph ── #}
+  <meta property="og:title" content="{{ _title }}">
+  <meta property="og:description" content="{{ _desc }}">
   <meta property="og:type" content="website">
-  <meta property="og:url" content="{{ config.site_url }}">
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="DocFirewall - Secure Document Intake for AI Pipelines">
-  <meta name="twitter:description" content="Protect your AI applications from hidden threats in documents. Detects prompt injections, malware, and more.">
+  <meta property="og:url" content="{{ _canonical }}">
+  <meta property="og:image" content="https://www.docfirewall.com/assets/logo_text.png">
+  <meta property="og:image:alt" content="DocFirewall — Secure Document Intake for AI Pipelines">
+  <meta property="og:site_name" content="DocFirewall">
+
+  {# ── Twitter Card ── #}
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="{{ _title }}">
+  <meta name="twitter:description" content="{{ _desc }}">
+  <meta name="twitter:image" content="https://www.docfirewall.com/assets/logo_text.png">
+  <meta name="twitter:image:alt" content="DocFirewall — Secure Document Intake for AI Pipelines">
+
+  {# ── JSON-LD Structured Data ── #}
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "name": "DocFirewall",
+        "url": "https://www.docfirewall.com/",
+        "description": "An open-source Python library that scans PDF, DOCX, PPTX, and XLSX files for prompt injection, malware, and data exfiltration — protecting LLMs and RAG pipelines.",
+        "applicationCategory": "SecurityApplication",
+        "applicationSubCategory": "AI Security, Document Security",
+        "operatingSystem": "Linux, macOS, Windows",
+        "programmingLanguage": "Python",
+        "runtimePlatform": "Python 3.10+",
+        "softwareVersion": "{{ config.extra.version_raw | default('0.3.2') }}",
+        "license": "https://opensource.org/licenses/MIT",
+        "downloadUrl": "https://pypi.org/project/doc-firewall/",
+        "installUrl": "https://pypi.org/project/doc-firewall/",
+        "codeRepository": "https://github.com/doc-firewall/doc-firewall",
+        "releaseNotes": "https://www.docfirewall.com/changelog/",
+        "documentation": "https://www.docfirewall.com/overview/",
+        "screenshot": "https://www.docfirewall.com/assets/og_image.png",
+        "keywords": "prompt injection, LLM security, RAG security, document scanner, PDF malware, AI firewall, Python",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "author": {
+          "@type": "Organization",
+          "name": "DocFirewall",
+          "url": "https://www.docfirewall.com/"
+        },
+        "featureList": [
+          "Prompt injection detection",
+          "Malware scanning via ClamAV and VirusTotal",
+          "Invisible text and obfuscation detection",
+          "PDF, DOCX, PPTX, XLSX support",
+          "100% local processing, zero external API calls",
+          "BERT-based ML scanning",
+          "Two-stage fast and deep scan architecture",
+          "Docker and CLI support"
+        ]
+      },
+      {
+        "@type": "WebSite",
+        "name": "DocFirewall",
+        "url": "https://www.docfirewall.com/",
+        "description": "Documentation and guides for DocFirewall — Secure Document Intake for LLMs and RAG pipelines.",
+        "potentialAction": {
+          "@type": "SearchAction",
+          "target": {
+            "@type": "EntryPoint",
+            "urlTemplate": "https://www.docfirewall.com/?q={search_term_string}"
+          },
+          "query-input": "required name=search_term_string"
+        }
+      },
+      {
+        "@type": "Organization",
+        "name": "DocFirewall",
+        "url": "https://www.docfirewall.com/",
+        "logo": "https://www.docfirewall.com/assets/logo.png",
+        "sameAs": [
+          "https://github.com/doc-firewall/doc-firewall",
+          "https://pypi.org/project/doc-firewall/"
+        ]
+      }
+    ]
+  }
+  </script>
 
   <link rel="apple-touch-icon" href="{{ base_url }}/assets/favicon.png">
   <link rel="icon" type="image/png" href="{{ base_url }}/assets/favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+{% endblock %}
+
+{% block htmltitle %}
+  {% if page and page.is_homepage %}
+    <title>DocFirewall — Secure Document Intake for LLMs &amp; RAG Pipelines | Python Library</title>
+  {% elif page and page.meta and page.meta.title %}
+    <title>{{ page.meta.title }} | DocFirewall</title>
+  {% else %}
+    {{ super() }}
+  {% endif %}
 {% endblock %}
 
 {% block content %}
