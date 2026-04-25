@@ -1,6 +1,3 @@
-# pip 26.0.1 is the latest available release.
-# CVE-2025-47273 (concatenated tar/ZIP misidentification) has no patched version yet.
-# Monitor https://github.com/pypa/pip/security/advisories for updates.
 pip==26.0.1 \
     --hash=sha256:bdb1b08f4274833d62c1aa29e20907365a2ceb950410df15fc9521bad440122b
 build==1.4.2 \
