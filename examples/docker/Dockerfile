@@ -30,6 +30,13 @@ RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 # Models will be downloaded on first run or can be pre-cached here if needed
 # ENV RAPIDOCR_DISABLE_AUTO_DOWNLOAD=0
 
+# Create a non-root user and change ownership of the application directory
+RUN useradd -m -s /bin/bash appuser && \
+    chown -R appuser:appuser /app
+
+# Switch to the non-root user
+USER appuser
+
 # Add a healthcheck to satisfy Trivy
 HEALTHCHECK NONE
 
