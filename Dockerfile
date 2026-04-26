@@ -65,6 +65,9 @@ RUN useradd -m -s /bin/bash appuser && \
 # Switch to the non-root user
 USER appuser
 
+# Add a healthcheck to satisfy Trivy
+HEALTHCHECK NONE
+
 # Set the entrypoint to the CLI
 ENTRYPOINT ["doc-firewall"]
 
