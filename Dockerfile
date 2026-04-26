@@ -11,7 +11,7 @@ ENV RAPIDOCR_DISABLE_AUTO_DOWNLOAD=1
 
 # Install system dependencies that might be needed by docling and document processing
 # Also installing ClamAV for antivirus scanning capability
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     python3-dev \
     libmagic1 \
@@ -57,6 +57,13 @@ RUN python -c "import sys, shutil, os, site; \
     print(f'Copying models from {src} to {dest}...'); \
     os.makedirs(dest, exist_ok=True); \
     shutil.copytree(src, dest, dirs_exist_ok=True)"
+
+# Create a non-root user and change ownership of the application directory
+RUN useradd -m -s /bin/bash appuser && \
+    chown -R appuser:appuser /app
+
+# Switch to the non-root user
+USER appuser
 
 # Set the entrypoint to the CLI
 ENTRYPOINT ["doc-firewall"]
