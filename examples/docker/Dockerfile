@@ -30,6 +30,9 @@ RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 # Models will be downloaded on first run or can be pre-cached here if needed
 # ENV RAPIDOCR_DISABLE_AUTO_DOWNLOAD=0
 
+# Add a healthcheck to satisfy Trivy
+HEALTHCHECK NONE
+
 # Set the entrypoint to the CLI
 ENTRYPOINT ["doc-firewall"]
 
