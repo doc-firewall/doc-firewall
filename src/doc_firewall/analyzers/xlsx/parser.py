@@ -19,9 +19,36 @@ logger = get_logger()
 
 def _extract_sheet_text(
     zf: zipfile.ZipFile, max_sheets: int = 200, max_part_size: int = 8 * 1024 * 1024
-) -> str:
-    """Extract plain text from all worksheet XML parts, up to max_sheets."""
-    # XLSX uses a shared strings table for cell text
+) -> tuple[str, list[str]]:
+    """Extract plain text and hidden text from all worksheet XML parts."""
+    
+    # 1. Parse styles to find hidden fonts
+    hidden_styles = set()
+    if "xl/styles.xml" in zf.namelist():
+        try:
+            with zf.open("xl/styles.xml") as f:
+                styles_root = ET.parse(f).getroot()
+            
+            hidden_fonts = set()
+            for i, font in enumerate(styles_root.findall(".//{*}fonts/{*}font")):
+                # Check for hidden formatting (size 0/1 or white text)
+                sz = font.find(".//{*}sz")
+                if sz is not None and sz.get("val") in ["0", "1"]:
+                    hidden_fonts.add(i)
+                    continue
+                color = font.find(".//{*}color")
+                if color is not None and str(color.get("rgb", "")).upper().endswith("FFFFFF"):
+                    hidden_fonts.add(i)
+                    continue
+                    
+            for i, xf in enumerate(styles_root.findall(".//{*}cellXfs/{*}xf")):
+                font_id_str = xf.get("fontId")
+                if font_id_str and font_id_str.isdigit() and int(font_id_str) in hidden_fonts:
+                    hidden_styles.add(i)
+        except Exception as e:
+            logger.debug("Error reading styles.xml: %s", e)
+
+    # 2. XLSX uses a shared strings table for cell text
     shared_strings: List[str] = []
     if "xl/sharedStrings.xml" in zf.namelist():
         try:
@@ -35,7 +62,7 @@ def _extract_sheet_text(
         except Exception as e:
             logger.debug("Error reading sharedStrings.xml: %s", e)
 
-    # Also extract inline strings from sheets
+    # 3. Extract text from sheets
     sheet_files = sorted(
         [
             n
@@ -44,6 +71,8 @@ def _extract_sheet_text(
         ]
     )
     inline_texts: List[str] = []
+    hidden_texts: List[str] = []
+    
     for sheet_path in sheet_files[:max_sheets]:
         try:
             info = zf.getinfo(sheet_path)
@@ -52,17 +81,36 @@ def _extract_sheet_text(
             with zf.open(sheet_path) as f:
                 root = ET.parse(f).getroot()
             for c in root.findall(".//{*}c"):
+                # Extract text correctly
                 t_attr = c.get("t", "")
+                s_attr = c.get("s", "0")
+                
+                cell_text = ""
                 v_elem = c.find("{*}v") if hasattr(c, "find") else None
-                # Try itertext as fallback
-                cell_text = " ".join(t.strip() for t in c.itertext() if t and t.strip())
+                
+                if t_attr == "s" and v_elem is not None and v_elem.text and v_elem.text.isdigit():
+                    idx = int(v_elem.text)
+                    if idx < len(shared_strings):
+                        cell_text = shared_strings[idx]
+                elif t_attr == "inlineStr":
+                    cell_text = " ".join(t.strip() for t in c.itertext() if t and t.strip())
+                else:
+                    if v_elem is not None and v_elem.text:
+                        cell_text = v_elem.text.strip()
+                    else:
+                        cell_text = " ".join(t.strip() for t in c.itertext() if t and t.strip())
+
                 if cell_text:
                     inline_texts.append(cell_text)
+                    # Check for hidden style mapped from xl/styles.xml
+                    if s_attr.isdigit() and int(s_attr) in hidden_styles:
+                        hidden_texts.append(cell_text)
+                        
         except Exception as e:
             logger.debug("Error reading %s: %s", sheet_path, e)
 
     combined = shared_strings + inline_texts
-    return "\n".join(combined)
+    return "\n".join(combined), hidden_texts
 
 
 def _extract_core_properties(zf: zipfile.ZipFile) -> Dict[str, Any]:
@@ -97,6 +145,38 @@ def _extract_app_properties(zf: zipfile.ZipFile) -> Dict[str, Any]:
     return meta
 
 
+def _extract_custom_properties(zf: zipfile.ZipFile) -> Dict[str, Any]:
+    meta: Dict[str, Any] = {}
+    if "docProps/custom.xml" not in zf.namelist():
+        return meta
+    try:
+        with zf.open("docProps/custom.xml") as f:
+            root = ET.parse(f).getroot()
+        for prop in root.findall(".//{http://schemas.openxmlformats.org/officeDocument/2006/custom-properties}property"):
+            name = prop.get("name")
+            value_elem = prop.find(".//")
+            if name and value_elem is not None and value_elem.text:
+                meta[name] = value_elem.text.strip()
+    except Exception as e:
+        logger.debug("Error reading custom.xml: %s", e)
+    return meta
+
+def _extract_comments(zf: zipfile.ZipFile) -> str:
+    texts = []
+    for n in zf.namelist():
+        if n.startswith("xl/comments") and n.endswith(".xml"):
+            try:
+                with zf.open(n) as f:
+                    root = ET.parse(f).getroot()
+                # Find all text in comments
+                for t in root.itertext():
+                    if t and t.strip():
+                        texts.append(t.strip())
+            except Exception as e:
+                pass
+    return " ".join(texts)
+
+
 def parse_xlsx(path: str, config: ScanConfig) -> ParsedDocument:
     """Parse an XLSX file: extract text from sheets and core metadata."""
     try:
@@ -116,13 +196,15 @@ def parse_xlsx(path: str, config: ScanConfig) -> ParsedDocument:
                     file_path=path, file_type="xlsx", text="", metadata={}
                 )
 
-            text = _extract_sheet_text(
+            text, hidden_texts = _extract_sheet_text(
                 zf,
                 max_sheets=config.limits.max_pages,
                 max_part_size=config.limits.max_xlsx_single_part_mb * 1024 * 1024,
             )
             core_meta = _extract_core_properties(zf)
             app_meta = _extract_app_properties(zf)
+            custom_meta = _extract_custom_properties(zf)
+            comments_text = _extract_comments(zf)
             sheet_count = len(
                 [
                     n
@@ -137,13 +219,16 @@ def parse_xlsx(path: str, config: ScanConfig) -> ParsedDocument:
     metadata: Dict[str, Any] = {
         **core_meta,
         **app_meta,
+        **custom_meta,
         "sheet_count": sheet_count,
+        "hidden_text": hidden_texts,
+        "comments": comments_text,
     }
 
     return ParsedDocument(
         file_path=path,
         file_type="xlsx",
-        text=text,
+        text=text + "\n" + comments_text,
         metadata=metadata,
-        xlsx={"sheet_count": sheet_count, "core": core_meta, "app": app_meta},
+        xlsx={"sheet_count": sheet_count, "core": core_meta, "app": app_meta, "hidden_text": hidden_texts, "comments": comments_text},
     )

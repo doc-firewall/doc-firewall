@@ -59,7 +59,7 @@ class AdvancedATSNLPDetector(Detector):
             top_phrase, top_score = phrase_scores[0]
             
             # Usually tf-idf maxes out around 0.6-0.8 for normal documents. If it hits 1.0 continuously, it's stuffing.
-            if top_score > 0.95:
+            if top_score > 0.999:  # adjusted to near 1.0 to prevent benign resume false pos
                 findings.append(Finding(
                     threat_id=ThreatID.T9_ATS_MANIPULATION,
                     severity=Severity.HIGH,
@@ -81,11 +81,11 @@ class AdvancedATSNLPDetector(Detector):
                 high_jaccard_count = 0
                 for i in range(len(sentences) - 1):
                     sim = jaccard_similarity(sentences[i], sentences[i+1])
-                    if sim > 0.8:
+                    if sim > 0.95:  # tightened from 0.8
                         high_jaccard_count += 1
                 
-                # If more than 20% of consecutive sentences are 80% identical, that's ranking spam!
-                if float(high_jaccard_count) / len(sentences) > 0.2:
+                # If more than 40% of consecutive sentences are 95% identical, that's ranking spam!
+                if float(high_jaccard_count) / len(sentences) > 0.4:
                      findings.append(Finding(
                         threat_id=ThreatID.T5_RANKING_MANIPULATION,
                         severity=Severity.MEDIUM,

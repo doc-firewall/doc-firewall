@@ -10,6 +10,12 @@ from ...logger import get_logger
 logger = get_logger()
 
 
+
+STEALTH_CHARS = [
+    (b"\xe2\x80\x8b", "Zero Width Space"),
+    (b"\xe2\x80\xae", "Right-to-Left Override"),
+]
+
 def fast_scan_xlsx(file_path: str, config: ScanConfig) -> List[Finding]:
     """Fast structural scan of an XLSX (ZIP-based) file."""
     findings: List[Finding] = []
@@ -131,13 +137,35 @@ def fast_scan_xlsx(file_path: str, config: ScanConfig) -> List[Finding]:
             # Embedded objects
             if z.filename.startswith("xl/embeddings/"):
                 if z.file_size > config.limits.min_embedded_object_size_bytes:
+                    evidence = {"filename": z.filename, "size": z.file_size}
+                    severity = Severity.MEDIUM
+                    title = "XLSX embedded object found"
+                    explain = f"Found embedded object '{z.filename}'."
+                    try:
+                        with zf.open(z.filename) as emf:
+                            header = emf.read(4096)
+                            if header.startswith(b"\xD0\xCF\x11\xE0"):
+                                severity = Severity.HIGH
+                                title = "Malicious OLE Payload Signature"
+                                explain += " Contains OLE binary header."
+                            elif header.startswith(b"MZ"):
+                                severity = Severity.CRITICAL
+                                title = "Executable Payload Signature"
+                                explain += " Contains DOS MZ header."
+                            elif header.startswith(b"\x7FELF"):
+                                severity = Severity.CRITICAL
+                                title = "Executable Payload Signature"
+                                explain += " Contains ELF binary header."
+                    except Exception:
+                        pass
+
                     findings.append(
                         Finding(
                             threat_id=ThreatID.T7_EMBEDDED_PAYLOAD,
-                            severity=Severity.MEDIUM,
-                            title="XLSX embedded object found",
-                            explain=f"Found embedded object '{z.filename}'.",
-                            evidence={"filename": z.filename, "size": z.file_size},
+                            severity=severity,
+                            title=title,
+                            explain=explain,
+                            evidence=evidence,
                             module="fast_scan.xlsx.ole",
                         )
                     )

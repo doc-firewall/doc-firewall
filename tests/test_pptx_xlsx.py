@@ -8,6 +8,8 @@ Covers:
 - Format-check analyzers (macros, external refs)
 """
 from __future__ import annotations
+import os
+import tempfile
 
 import io
 import os
@@ -140,7 +142,7 @@ class TestPptxFastScan(unittest.TestCase):
                 pass
 
     def _tmp(self, name: str, data: bytes) -> str:
-        path = f"/tmp/test_pptx_{name}.pptx"
+        path = os.path.join(tempfile.gettempdir(), f"test_pptx_{name}.pptx")
         self._files.append(path)
         return _write_tmp(path, data)
 
@@ -225,7 +227,7 @@ class TestPptxFastScan(unittest.TestCase):
         self.assertTrue(any(f.threat_id == ThreatID.T6_DOS for f in findings))
 
     def test_not_a_zip_returns_empty(self):
-        path = "/tmp/test_pptx_nozip.pptx"
+        path = os.path.join(tempfile.gettempdir(), "test_pptx_nozip.pptx")
         self._files.append(path)
         with open(path, "wb") as f:
             f.write(b"NOTAZIP")
@@ -250,7 +252,7 @@ class TestPptxParser(unittest.TestCase):
                 pass
 
     def _tmp(self, name: str, data: bytes) -> str:
-        path = f"/tmp/test_pptx_parser_{name}.pptx"
+        path = os.path.join(tempfile.gettempdir(), f"test_pptx_parser_{name}.pptx")
         self._files.append(path)
         return _write_tmp(path, data)
 
@@ -296,7 +298,7 @@ class TestPptxParser(unittest.TestCase):
         self.assertEqual(doc.metadata.get("title"), "TestPresentation")
 
     def test_bad_zip_returns_empty_doc(self):
-        path = "/tmp/test_pptx_bad.pptx"
+        path = os.path.join(tempfile.gettempdir(), "test_pptx_bad.pptx")
         self._files.append(path)
         with open(path, "wb") as f:
             f.write(b"NOT A ZIP")
@@ -328,7 +330,7 @@ class TestPptxFormatChecks(unittest.TestCase):
                 pass
 
     def _tmp(self, name: str, data: bytes) -> str:
-        path = f"/tmp/test_pptx_dc_{name}.pptx"
+        path = os.path.join(tempfile.gettempdir(), f"test_pptx_dc_{name}.pptx")
         self._files.append(path)
         return _write_tmp(path, data)
 
@@ -394,7 +396,7 @@ class TestXlsxFastScan(unittest.TestCase):
                 pass
 
     def _tmp(self, name: str, data: bytes) -> str:
-        path = f"/tmp/test_xlsx_{name}.xlsx"
+        path = os.path.join(tempfile.gettempdir(), f"test_xlsx_{name}.xlsx")
         self._files.append(path)
         return _write_tmp(path, data)
 
@@ -493,7 +495,7 @@ class TestXlsxFastScan(unittest.TestCase):
         self.assertTrue(any(f.threat_id == ThreatID.T6_DOS for f in findings))
 
     def test_not_a_zip_returns_empty(self):
-        path = "/tmp/test_xlsx_nozip.xlsx"
+        path = os.path.join(tempfile.gettempdir(), "test_xlsx_nozip.xlsx")
         self._files.append(path)
         with open(path, "wb") as f:
             f.write(b"NOTAZIP")
@@ -518,7 +520,7 @@ class TestXlsxParser(unittest.TestCase):
                 pass
 
     def _tmp(self, name: str, data: bytes) -> str:
-        path = f"/tmp/test_xlsx_parser_{name}.xlsx"
+        path = os.path.join(tempfile.gettempdir(), f"test_xlsx_parser_{name}.xlsx")
         self._files.append(path)
         return _write_tmp(path, data)
 
@@ -582,7 +584,7 @@ class TestXlsxParser(unittest.TestCase):
         self.assertEqual(doc.metadata.get("title"), "SensitiveWorkbook")
 
     def test_bad_zip_returns_empty_doc(self):
-        path = "/tmp/test_xlsx_bad.xlsx"
+        path = os.path.join(tempfile.gettempdir(), "test_xlsx_bad.xlsx")
         self._files.append(path)
         with open(path, "wb") as f:
             f.write(b"NOT A ZIP")
@@ -614,7 +616,7 @@ class TestXlsxFormatChecks(unittest.TestCase):
                 pass
 
     def _tmp(self, name: str, data: bytes) -> str:
-        path = f"/tmp/test_xlsx_dc_{name}.xlsx"
+        path = os.path.join(tempfile.gettempdir(), f"test_xlsx_dc_{name}.xlsx")
         self._files.append(path)
         return _write_tmp(path, data)
 
@@ -747,7 +749,7 @@ class TestScannerRouting(unittest.TestCase):
                 pass
 
     def _tmp(self, name: str, data: bytes) -> str:
-        path = f"/tmp/test_route_{name}"
+        path = os.path.join(tempfile.gettempdir(), f"test_route_{name}")
         self._files.append(path)
         return _write_tmp(path, data)
 

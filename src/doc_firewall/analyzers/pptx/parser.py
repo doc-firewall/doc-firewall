@@ -23,9 +23,10 @@ _NS_CP = "{http://schemas.openxmlformats.org/package/2006/metadata/core-properti
 
 def _extract_slide_text(
     zf: zipfile.ZipFile, max_slides: int = 500, max_part_size: int = 8 * 1024 * 1024
-) -> str:
-    """Extract plain text from all slide XML parts, up to max_slides."""
+) -> tuple[str, list[str]]:
+    """Extract plain text and hidden text from all slide XML parts."""
     texts: list[str] = []
+    hidden_texts: list[str] = []
     slide_files = sorted(
         [
             n
@@ -40,12 +41,37 @@ def _extract_slide_text(
                 continue
             with zf.open(slide_path) as f:
                 root = ET.parse(f).getroot()
+            
             slide_text = " ".join(t.strip() for t in root.itertext() if t and t.strip())
             if slide_text:
                 texts.append(slide_text)
+                
+            # Scan for hidden text (T9 ATS Manipulation)
+            for r in root.findall('.//a:r', {'a': 'http://schemas.openxmlformats.org/drawingml/2006/main'}):
+                rPr = r.find('.//a:rPr', {'a': 'http://schemas.openxmlformats.org/drawingml/2006/main'})
+                t = r.find('.//a:t', {'a': 'http://schemas.openxmlformats.org/drawingml/2006/main'})
+                if rPr is not None and t is not None and t.text and t.text.strip():
+                    text_val = t.text.strip()
+                    # Font size 0 or 1
+                    sz = rPr.get('sz')
+                    if sz in ["0", "1"]:
+                        hidden_texts.append(text_val)
+                        continue
+                    # White text (srgbClr val="FFFFFF") or fully transparent
+                    solidFill = rPr.find('.//a:solidFill', {'a': 'http://schemas.openxmlformats.org/drawingml/2006/main'})
+                    if solidFill is not None:
+                        srgbClr = solidFill.find('.//a:srgbClr', {'a': 'http://schemas.openxmlformats.org/drawingml/2006/main'})
+                        if srgbClr is not None and srgbClr.get('val', '').upper() == 'FFFFFF':
+                            hidden_texts.append(text_val)
+                            continue
+                        alpha = solidFill.find('.//a:alpha', {'a': 'http://schemas.openxmlformats.org/drawingml/2006/main'})
+                        if alpha is not None and alpha.get('val') == '0':
+                            hidden_texts.append(text_val)
+                            continue
+
         except Exception as e:
             logger.debug("Error reading %s: %s", slide_path, e)
-    return "\n".join(texts)
+    return "\n".join(texts), hidden_texts
 
 
 def _extract_core_properties(zf: zipfile.ZipFile) -> Dict[str, Any]:
@@ -82,6 +108,38 @@ def _extract_app_properties(zf: zipfile.ZipFile) -> Dict[str, Any]:
     return meta
 
 
+def _extract_custom_properties(zf: zipfile.ZipFile) -> Dict[str, Any]:
+    meta: Dict[str, Any] = {}
+    if "docProps/custom.xml" not in zf.namelist():
+        return meta
+    try:
+        with zf.open("docProps/custom.xml") as f:
+            root = ET.parse(f).getroot()
+        for prop in root.findall(".//{http://schemas.openxmlformats.org/officeDocument/2006/custom-properties}property"):
+            name = prop.get("name")
+            value_elem = prop.find(".//")
+            if name and value_elem is not None and value_elem.text:
+                meta[name] = value_elem.text.strip()
+    except Exception as e:
+        logger.debug("Error reading custom.xml: %s", e)
+    return meta
+
+def _extract_comments(zf: zipfile.ZipFile) -> str:
+    texts = []
+    for n in zf.namelist():
+        if n.startswith("ppt/comments/comment") and n.endswith(".xml"):
+            try:
+                with zf.open(n) as f:
+                    root = ET.parse(f).getroot()
+                # Find all text in comments
+                for t in root.itertext():
+                    if t and t.strip():
+                        texts.append(t.strip())
+            except Exception as e:
+                pass
+    return " ".join(texts)
+
+
 def parse_pptx(path: str, config: ScanConfig) -> ParsedDocument:
     """Parse a PPTX file: extract text from slides and core metadata."""
     try:
@@ -101,13 +159,15 @@ def parse_pptx(path: str, config: ScanConfig) -> ParsedDocument:
                     file_path=path, file_type="pptx", text="", metadata={}
                 )
 
-            text = _extract_slide_text(
+            text, hidden_texts = _extract_slide_text(
                 zf,
                 max_slides=config.limits.max_pages,
                 max_part_size=config.limits.max_pptx_single_part_mb * 1024 * 1024,
             )
             core_meta = _extract_core_properties(zf)
             app_meta = _extract_app_properties(zf)
+            custom_meta = _extract_custom_properties(zf)
+            comments_text = _extract_comments(zf)
             slide_count = len(
                 [
                     n
@@ -122,13 +182,16 @@ def parse_pptx(path: str, config: ScanConfig) -> ParsedDocument:
     metadata: Dict[str, Any] = {
         **core_meta,
         **app_meta,
+        **custom_meta,
         "slide_count": slide_count,
+        "hidden_text": hidden_texts,
+        "comments": comments_text,
     }
 
     return ParsedDocument(
         file_path=path,
         file_type="pptx",
-        text=text,
+        text=text + "\n" + comments_text,
         metadata=metadata,
-        pptx={"slide_count": slide_count, "core": core_meta, "app": app_meta},
+        pptx={"slide_count": slide_count, "core": core_meta, "app": app_meta, "hidden_text": hidden_texts, "comments": comments_text},
     )
