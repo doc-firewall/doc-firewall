@@ -48,7 +48,15 @@ class ATSManipulationDetector(Detector):
 
             # Simple frequency check (also cover T9 since T5 overlap caused FNs)
             tokens = [t for t in text.lower().split() if t.isalpha() and len(t) > 2]
-            if len(tokens) >= 50:
+            # Include keywords/description metadata in token analysis to catch
+            # attacks embedded in PDF/XLSX metadata rather than body text
+            if doc.metadata:
+                for key in ("keywords", "description"):
+                    val = doc.metadata.get(key, "")
+                    if val and isinstance(val, str):
+                        extra = [t for t in val.lower().split() if t.isalpha() and len(t) > 2]
+                        tokens.extend(extra)
+            if len(tokens) >= 25:
                 from collections import Counter
 
                 top_tokens = [k for k, v in Counter(tokens).most_common(3)]

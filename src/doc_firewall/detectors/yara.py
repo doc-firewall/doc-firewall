@@ -20,19 +20,14 @@ class YaraDetector(Detector):
     name = "yara"
 
     def run(self, doc: ParsedDocument, config: ScanConfig) -> List[Finding]:
-        if not config.enable_yara:
-            return []
-
-        # Fallback simple malware check if YARA is not fully configured or
-        # for standard test strings
-        # EICAR test string
+        # EICAR test string check always runs regardless of enable_yara setting
         eicar_signature = (
             r"X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
         )
 
         findings = []
         text = doc.text or ""
-        
+
         # Combine all metadata into a searchable string
         meta_text = ""
         if doc.metadata:
@@ -52,8 +47,11 @@ class YaraDetector(Detector):
             )
             return findings  # CRITICAL stops scan usually
 
+        if not config.enable_yara:
+            return findings
+
         # Custom/User-defined YARA rules
-        if config.enable_yara and config.yara_rules_path:
+        if config.yara_rules_path:
             if yara is None:
                 # Log warning in production: 'yara-python' not installed
                 return findings
