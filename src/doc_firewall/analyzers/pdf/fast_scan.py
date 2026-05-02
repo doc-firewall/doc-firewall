@@ -130,7 +130,7 @@ def fast_scan_pdf(file_path: str, config: ScanConfig) -> List[Finding]:
     # 2c. White-on-White Stealth Text (Obfuscation / Hidden Content)
     # rg = non-stroking (fill) color; RG = stroking color.
     # Covers integer (1 1 1), float (1.0 1.0 1.0) and trailing-dot (1. 1. 1.) forms.
-    _WHITE_OP_RE = re.compile(rb"1\.?0?\s+1\.?0?\s+1\.?0?\s+r[gG]")
+    _WHITE_OP_RE = re.compile(rb"1\.?0?\s+1\.?0?\s+1\.?0?\s+[rR][gG]")
     if _WHITE_OP_RE.search(data):
         findings.append(
             Finding(
