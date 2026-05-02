@@ -162,6 +162,39 @@ class EmbeddedPayloadDetector(Detector):
                     )
                 )
 
+        # 4. Hex-encoded binary file signatures in document text/metadata
+        # Attackers embed PE (Windows), ELF (Linux) headers as hex strings
+        # to evade text-based content filters while keeping payload accessible.
+        all_text = text
+        if doc.metadata:
+            for key in ("keywords", "description", "comments"):
+                val = doc.metadata.get(key, "")
+                if val and isinstance(val, str):
+                    all_text = all_text + " " + val
+
+        BIN_HEX_SIGS = [
+            (r"\b4[Dd]5[Aa]\b", "Windows PE executable (MZ header as hex)"),
+            (r"\b7[Ff]45[Cc]46\b", "Linux ELF executable header as hex"),
+        ]
+        for pattern, label in BIN_HEX_SIGS:
+            if re.search(pattern, all_text):
+                findings.append(
+                    Finding(
+                        threat_id=ThreatID.T7_EMBEDDED_PAYLOAD,
+                        severity=Severity.HIGH,
+                        title=f"Hex-Encoded Binary Signature: {label}",
+                        explain=(
+                            "Found hex-encoded binary file header in document "
+                            "content. This pattern indicates an embedded executable "
+                            "or binary payload concealed within document text."
+                        ),
+                        evidence={"signature": label},
+                        module=self.name,
+                        confidence=0.85,
+                    )
+                )
+                break
+
         return findings
 
     @staticmethod

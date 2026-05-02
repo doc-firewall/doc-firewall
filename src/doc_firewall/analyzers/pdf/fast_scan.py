@@ -127,6 +127,30 @@ def fast_scan_pdf(file_path: str, config: ScanConfig) -> List[Finding]:
             #     # ...
             # ))
 
+    # 2c. White-on-White Stealth Text (Obfuscation / Hidden Content)
+    # PDFs with `1 1 1 rg` (white fill) + text operators hide content invisibly.
+    # This pattern is used to conceal ATS manipulation, ranking keywords, and
+    # prompt injections from human reviewers while remaining parseable.
+    WHITE_COLOR_OPS = [b"1 1 1 rg", b"1 1 1 RG"]
+    for op in WHITE_COLOR_OPS:
+        if op in data:
+            findings.append(
+                Finding(
+                    threat_id=ThreatID.T3_OBFUSCATION,
+                    severity=Severity.HIGH,
+                    title="PDF White-on-White Stealth Text",
+                    explain=(
+                        "Detected white color operator in PDF content stream. "
+                        "Text rendered in white on white background is invisible "
+                        "to humans but readable by parsers — a common technique "
+                        "for hiding adversarial content."
+                    ),
+                    evidence={"operator": op.decode()},
+                    module="fast_scan.pdf.stealth",
+                )
+            )
+            break
+
     # 3. V2 Multi-Signal Obfuscation Logic
     signals = []
 
