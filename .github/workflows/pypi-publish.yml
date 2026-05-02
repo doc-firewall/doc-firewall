@@ -32,6 +32,9 @@ jobs:
     - name: Build distribution
       run: python -m build
 
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+
     - name: Generate artifact attestation
       id: provenance
       uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
@@ -40,9 +43,6 @@ jobs:
 
     - name: Rename attestation bundle for Scorecard
       run: cp "${{ steps.provenance.outputs.bundle-path }}" attestation.intoto.jsonl
-
-    - name: Publish to PyPI
-      uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
 
     - name: Sign the dists with Sigstore
       uses: sigstore/gh-action-sigstore-python@04cffa1d795717b140764e8b640de88853c92acc # v3.3.0
