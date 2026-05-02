@@ -5,12 +5,12 @@ FROM --platform=linux/arm64 python:3.10-slim@sha256:4ba18b066cee17f2696cf9a2ba56
 # Set working directory
 WORKDIR /app
 
-# Environment variables to disable OCR and prevent model downloads
-ENV DOCLING_DISABLE_OCR=1
+# Environment variables to enable OCR and prevent model downloads
+ENV DOCLING_DISABLE_OCR=0
 ENV RAPIDOCR_DISABLE_AUTO_DOWNLOAD=1
 
 # Install system dependencies that might be needed by docling and document processing
-# Also installing ClamAV for antivirus scanning capability
+# Also installing ClamAV for antivirus scanning capability and Tesseract for OCR
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     python3-dev \
@@ -20,6 +20,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     clamav \
     clamav-daemon \
+    tesseract-ocr \
+    tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
 
 # Update ClamAV definitions (this might take a minute during build)

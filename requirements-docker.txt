@@ -791,6 +791,7 @@ packaging==26.2 \
     # via
     #   accelerate
     #   huggingface-hub
+    #   pytesseract
     #   safetensors
     #   transformers
 pandas==3.0.2 \
@@ -943,6 +944,7 @@ pillow==12.2.0 \
     #   docling-ibm-models
     #   docling-parse
     #   ocrmac
+    #   pytesseract
     #   python-pptx
     #   rapidocr
     #   torchvision
@@ -1273,6 +1275,10 @@ pypdfium2==5.7.1 \
     --hash=sha256:fcea3cc20b7cca7d84ceee68b9c6ef7fe773fb71c145542769dc2ceb27e9698a \
     --hash=sha256:fdf117af26bd310f4f176b3cf0e2e23f0f800e48dcf2bcf6c2cca0de3326f5cb
     # via docling
+pytesseract==0.3.13 \
+    --hash=sha256:4bf5f880c99406f52a3cfc2633e42d9dc67615e69d8a509d74867d3baddb5db9 \
+    --hash=sha256:7a99c6c2ac598360693d83a416e36e0b33a67638bb9d77fdcac094a3589d4b34
+    # via doc-firewall (pyproject.toml)
 python-dateutil==2.9.0.post0 \
     --hash=sha256:37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3 \
     --hash=sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427

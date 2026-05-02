@@ -18,6 +18,8 @@ jobs:
     environment:
       name: pypi
       url: https://pypi.org/p/doc-firewall
+    outputs:
+      hashes: ${{ steps.hash.outputs.hashes }}
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
     
@@ -31,6 +33,11 @@ jobs:
       
     - name: Build distribution
       run: python -m build
+
+    - name: Generate artifact hashes
+      id: hash
+      run: |
+        cd dist && echo "hashes=$(sha256sum * | base64 -w0)" >> $GITHUB_OUTPUT
 
     - name: Generate artifact attestation
       uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
@@ -55,3 +62,14 @@ jobs:
         '${{ github.ref_name }}' dist/**
         --repo '${{ github.repository }}'
         --clobber
+
+  provenance:
+    needs: [build-and-publish]
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.0.0
+    with:
+      base64-subjects: "${{ needs.build-and-publish.outputs.hashes }}"
+      upload-assets: true
