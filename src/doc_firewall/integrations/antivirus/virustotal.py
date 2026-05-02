@@ -44,8 +44,8 @@ class VirusTotalEngine(AntivirusEngine):
         headers = {"x-apikey": self.api_key}
 
         try:
-            req = urllib.request.Request(url, headers=headers)  # noqa: S310
-            with urllib.request.urlopen(req) as response:  # noqa: S310
+            req = urllib.request.Request(url, headers=headers)  # noqa: S310  # nosec B310
+            with urllib.request.urlopen(req) as response:  # noqa: S310  # nosec B310
                 if response.status == 200:
                     data = json.loads(response.read())
                     stats = data["data"]["attributes"]["last_analysis_stats"]

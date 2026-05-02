@@ -32,15 +32,20 @@ class YaraDetector(Detector):
 
         findings = []
         text = doc.text or ""
+        
+        # Combine all metadata into a searchable string
+        meta_text = ""
+        if doc.metadata:
+            meta_text = " ".join(str(v) for v in doc.metadata.values())
 
-        # Check text
-        if eicar_signature in text:
+        # Check text and metadata
+        if eicar_signature in text or eicar_signature in meta_text:
             findings.append(
                 Finding(
                     threat_id=ThreatID.T1_MALWARE,
                     severity=Severity.CRITICAL,
                     title="Malware Signature Detected (EICAR)",
-                    explain="Found EICAR test string in document text.",
+                    explain="Found EICAR test string in document text or metadata.",
                     evidence={"signature": "EICAR-STANDARD-ANTIVIRUS-TEST-FILE"},
                     module=self.name,
                 )

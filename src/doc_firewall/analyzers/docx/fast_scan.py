@@ -9,6 +9,12 @@ from ...logger import get_logger
 logger = get_logger()
 
 
+
+STEALTH_CHARS = [
+    (b"\xe2\x80\x8b", "Zero Width Space"),
+    (b"\xe2\x80\xae", "Right-to-Left Override"),
+]
+
 def fast_scan_docx(file_path: str, config: ScanConfig) -> List[Finding]:
     findings = []
 
