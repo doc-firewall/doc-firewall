@@ -22,7 +22,7 @@ jobs:
       contents: read
       actions: read
       security-events: write  # Required for SARIF upload inside the reusable workflow
-    uses: "google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@eb5b619bb565d10623076caba5263750fde3c790" # v2.3.5
+    uses: "google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@43f380b8fc43a816831a9f5ee6fc91170809c7e9" # v2.3.5
     with:
       scan-args: |-
         -r
