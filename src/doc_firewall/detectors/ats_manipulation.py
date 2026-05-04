@@ -40,7 +40,7 @@ class ATSManipulationDetector(Detector):
                         severity=Severity.HIGH,
                         title="Repeated Keywords Sequence",
                         explain="Detected a sequence of identical words repeated 10+ times.",
-                        evidence={"snippet": repeated_seq.group(0)[:50]},
+                        evidence={"snippet": repeated_seq.group(0)[:50], "malicious_text": repeated_seq.group(0)[:250]},
                         module=self.name,
                         confidence=0.9,
                     )
@@ -78,6 +78,7 @@ class ATSManipulationDetector(Detector):
                                 evidence={
                                     "token": most_common,
                                     "ratio": freq / len(tokens),
+                                    "malicious_text": most_common
                                 },
                                 module=self.name,
                                 confidence=0.9,
@@ -101,7 +102,7 @@ class ATSManipulationDetector(Detector):
                             "Found text hidden via 'vanish' property or "
                             "white-on-white/size-0 formatting."
                         ),
-                        evidence={"snippet": ht[:100]},
+                        evidence={"snippet": ht[:100], "malicious_text": ht[:250]},
                         module=self.name,
                         confidence=0.95,
                     )
@@ -136,7 +137,7 @@ class ATSManipulationDetector(Detector):
                                 "Document contains text marked as hidden, often "
                                 "used for ATS manipulation."
                             ),
-                            evidence={"length": content_len},
+                            evidence={"length": content_len, "malicious_text": str(hidden)[:250]},
                             module=self.name,
                             confidence=0.9,
                         )
@@ -157,7 +158,7 @@ class ATSManipulationDetector(Detector):
                         severity=Severity.HIGH,
                         title="Hidden ATS Text via Zero-Width Characters",
                         explain="High number of zero-width characters used to hide ATS text.",
-                        evidence={"zw_count": zw_count},
+                        evidence={"zw_count": zw_count, "malicious_text": "Zero-width sequence detected"},
                         module=self.name,
                         confidence=0.9,
                     )

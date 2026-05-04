@@ -76,7 +76,7 @@ class PiiDetector(Detector):
                 severity=severity,
                 title="Personally Identifiable Information (PII) Detected",
                 explain="The document contains patterns resembling PII.",
-                evidence={"matches": matches},
+                evidence={"matches": matches, "malicious_text": str(matches)[:250]},
                 module="detectors.pii",
             )
         ]

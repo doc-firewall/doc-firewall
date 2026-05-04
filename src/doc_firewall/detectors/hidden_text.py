@@ -78,7 +78,7 @@ class HiddenTextDetector(Detector):
                             "Found significant amount of text marked as hidden "
                             "(e.g., invisible font, zero size)."
                         ),
-                        evidence={"snippet": content[:100], "length": len(content)},
+                        evidence={"snippet": content[:100], "length": len(content), "malicious_text": content[:250]},
                         module=self.name,
                         confidence=0.9,
                     )

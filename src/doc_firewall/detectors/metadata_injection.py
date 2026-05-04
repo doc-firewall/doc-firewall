@@ -55,7 +55,7 @@ class MetadataInjectionDetector(Detector):
                         explain=(
                             "Found metadata or comment field exceeding 5000 characters."
                         ),
-                        evidence={"length": len(content), "snippet": content[:50]},
+                        evidence={"length": len(content), "snippet": content[:50], "malicious_text": content[:250]},
                         module=self.name,
                         confidence=0.8,
                     )
@@ -76,7 +76,7 @@ class MetadataInjectionDetector(Detector):
                             "Detailed script tags or event handlers found "
                             "in metadata/comments."
                         ),
-                        evidence={"snippet": content[:100]},
+                        evidence={"snippet": content[:100], "malicious_text": content[:250]},
                         module=self.name,
                         confidence=1.0,
                     )
@@ -94,7 +94,7 @@ class MetadataInjectionDetector(Detector):
                         severity=Severity.HIGH,
                         title="SQL Injection in Metadata",
                         explain="Found SQL injection syntax in metadata.",
-                        evidence={"snippet": content[:100]},
+                        evidence={"snippet": content[:100], "malicious_text": content[:250]},
                         module=self.name,
                         confidence=0.9,
                     )
@@ -124,7 +124,7 @@ class MetadataInjectionDetector(Detector):
                                 "Potentially malicious instructions found in "
                                 "document metadata."
                             ),
-                            evidence={"snippet": content[:100], "pattern": pat},
+                            evidence={"snippet": content[:100], "pattern": pat, "malicious_text": content[:250]},
                             module=self.name,
                             confidence=0.9,
                         )
