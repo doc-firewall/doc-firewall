@@ -182,6 +182,7 @@ Comprehensive example covering Prompt Injection, ATS Manipulation, and Active Co
     ✅ DETECTED 1 Threat Indicators:
       - [T9_ATS_MANIPULATION] Repeated Keywords Sequence
         Snippet: Python Python Python Python Python Python...
+        Malicious Text (max 250 chars): Python Python Python Python Python Python...
     
     >>> 3. Active Content (Malware Vectors)
     
@@ -191,7 +192,9 @@ Comprehensive example covering Prompt Injection, ATS Manipulation, and Active Co
     Risk Score: 0.98
     ✅ DETECTED 4 Threat Indicators:
       - [T2_ACTIVE_CONTENT] Suspicious PDF Token found: /JavaScript
+        Malicious Text (max 250 chars): /JavaScript
       - [T2_ACTIVE_CONTENT] Suspicious PDF Token found: /OpenAction
+        Malicious Text (max 250 chars): /OpenAction
     ```
 
 <!-- Updated examples paths to use bundled samples -->

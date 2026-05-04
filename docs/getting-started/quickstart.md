@@ -38,6 +38,8 @@ if report.verdict == "BLOCK":
         print(f"  Sev: {finding.severity}")
         print(f"  Explain: {finding.explain}")
         print(f"  Module: {finding.module}")
+        if "malicious_text" in finding.evidence:
+            print(f"  Malicious Text: {finding.evidence['malicious_text']}")
 ```
 
 ### Report Attributes
