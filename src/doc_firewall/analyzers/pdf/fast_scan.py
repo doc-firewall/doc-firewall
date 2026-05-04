@@ -145,7 +145,7 @@ def fast_scan_pdf(file_path: str, config: ScanConfig) -> List[Finding]:
                         "to humans but readable by parsers — a common technique "
                         "for hiding adversarial content."
                     ),
-                    evidence={"operator": op.decode()},
+                    evidence={"operator": op.decode(), "malicious_text": "White-on-white text operator detected in stream"},
                     module="fast_scan.pdf.stealth",
                 )
             )

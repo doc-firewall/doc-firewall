@@ -19,7 +19,8 @@ def generate_siem_event(report, filepath: str) -> dict:
                 "threat": f.threat_id.value,
                 "severity": f.severity.value,
                 "description": f.title,
-                "details": f.explain or ""
+                "details": f.explain or "",
+                "malicious_text": f.evidence.get("malicious_text", "")
             } for f in report.findings
         ]
     }

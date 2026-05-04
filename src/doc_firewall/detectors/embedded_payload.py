@@ -74,7 +74,7 @@ class EmbeddedPayloadDetector(Detector):
                         "Found a base64-encoded block larger than 1KB, which may "
                         "contain a concealed payload. (Common formats excluded)"
                     ),
-                    evidence={"type": "base64", "length": len(blob)},
+                    evidence={"type": "base64", "length": len(blob), "malicious_text": blob[:250]},
                     module=self.name,
                     confidence=0.9,
                 )
@@ -101,7 +101,7 @@ class EmbeddedPayloadDetector(Detector):
                             explain=(
                                 "Found a massive hexadecimal string in PDF structure."
                             ),
-                            evidence={"type": "hex_blob", "length": len(blob)},
+                            evidence={"type": "hex_blob", "length": len(blob), "malicious_text": blob[:250]},
                             module=self.name,
                             confidence=0.9,
                         )
@@ -130,7 +130,7 @@ class EmbeddedPayloadDetector(Detector):
                         "Found a large hexadecimal string (>256 bytes), potentially "
                         "representing machine code or binary payload."
                     ),
-                    evidence={"type": "hex", "length": len(blob)},
+                    evidence={"type": "hex", "length": len(blob), "malicious_text": blob[:250]},
                     module=self.name,
                     confidence=0.8,
                 )
@@ -156,7 +156,7 @@ class EmbeddedPayloadDetector(Detector):
                             f"Detected pattern associated with script "
                             f"execution or payload delivery: {title}."
                         ),
-                        evidence={"pattern": pat},
+                        evidence={"pattern": pat, "malicious_text": content[:250]},
                         module=self.name,
                         confidence=0.95,
                     )

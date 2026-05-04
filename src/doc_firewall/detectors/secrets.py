@@ -44,7 +44,7 @@ class SecretsDetector(Detector):
                     "The document contains patterns resembling credentials "
                     "or private keys."
                 ),
-                evidence={"matches": matches},
+                evidence={"matches": matches, "malicious_text": str(matches)[:250]},
                 module="detectors.secrets",
             )
         ]

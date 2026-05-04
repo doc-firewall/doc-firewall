@@ -37,6 +37,7 @@ class RankingManipulationDetector(Detector):
                         "freq": freq,
                         "token_count": len(tokens),
                         "ratio": ratio,
+                        "malicious_text": most_common[:250],
                     },
                     module="detectors.ranking_manipulation",
                 )

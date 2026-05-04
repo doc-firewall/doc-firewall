@@ -244,6 +244,7 @@ class PromptInjectionDetector(Detector):
                         "score": total_score,
                         "match_count": len(matches),
                         "top_matches": matches[:5],
+                        "malicious_text": matches[0]["match"] if matches else clean_text[:250]
                     },
                     module="detectors.prompt_injection_v2",
                 )

@@ -93,6 +93,7 @@ class YaraDetector(Detector):
                                         "rule": m.rule,
                                         "tags": m.tags,
                                         "meta": m.meta,
+                                        "malicious_text": str(m.strings[0][2][:250]) if getattr(m, "strings", None) and len(m.strings) > 0 else ""
                                     },
                                     module=f"{self.name}.binary",
                                 )

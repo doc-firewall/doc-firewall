@@ -55,17 +55,29 @@ class AdvancedATSNLPDetector(Detector):
             # Pair scores with features
             phrase_scores = [(feature_names[i], max_scores[i]) for i in range(len(feature_names))]
             phrase_scores.sort(key=lambda x: x[1], reverse=True)
-            
-            top_phrase, top_score = phrase_scores[0]
-            
-            # Usually tf-idf maxes out around 0.6-0.8 for normal documents. If it hits 1.0 continuously, it's stuffing.
-            if top_score > 0.999:  # adjusted to near 1.0 to prevent benign resume false pos
+
+            top_phrase = None
+            top_score = 0.0
+            for phrase, score in phrase_scores:
+                # Ignore singleton header terms like "education" or names that can
+                # score 1.0 in benign resumes when fitting on a single document.
+                if " " not in phrase:
+                    continue
+                if full_text.lower().count(phrase.lower()) < 2:
+                    continue
+                top_phrase, top_score = phrase, score
+                break
+
+            # Usually tf-idf maxes out around 0.6-0.8 for normal documents. If a
+            # repeated multi-word phrase hits ~1.0, it's strong evidence of stuffing.
+            if top_phrase and top_score > 0.999:
                 findings.append(Finding(
                     threat_id=ThreatID.T9_ATS_MANIPULATION,
                     severity=Severity.HIGH,
                     confidence=round(float(top_score), 2),
                     title="Keyword Stuffing Drift",
-                    explain=f"TF-IDF detected severe keyword stuffing drift. Top anomalous phrase: '{top_phrase}'"
+                    explain=f"TF-IDF detected severe keyword stuffing drift. Top anomalous phrase: '{top_phrase}'",
+                    evidence={"malicious_text": top_phrase}
                 ))
 
             # Jaccard calculations for context deviation
@@ -91,7 +103,8 @@ class AdvancedATSNLPDetector(Detector):
                         severity=Severity.MEDIUM,
                         confidence=0.85,
                         title="Semantic Repetition",
-                        explain="Jaccard similarity detected abnormally high repetition of context/role text."
+                        explain="Jaccard similarity detected abnormally high repetition of context/role text.",
+                        evidence={"malicious_text": sentences[0][:250]}
                     ))
 
         except Exception as e:

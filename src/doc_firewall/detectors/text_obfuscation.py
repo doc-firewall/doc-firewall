@@ -59,7 +59,7 @@ class TextObfuscationDetector(Detector):
                     severity=Severity.HIGH,
                     title="Found /Encrypt Token",
                     explain="File contains /Encrypt token, indicating PDF encryption.",
-                    evidence={"token": "/Encrypt"},
+                    evidence={"token": "/Encrypt", "malicious_text": "/Encrypt"},
                     module=self.name,
                 )
             )
@@ -125,7 +125,7 @@ class TextObfuscationDetector(Detector):
                             f"Detected multiple obfuscation signals: "
                             f"{', '.join(signals)}"
                         ),
-                        evidence={"signals": signals, "count": len(signals)},
+                        evidence={"signals": signals, "count": len(signals), "malicious_text": str(signals)[:250]},
                         module=self.name,
                     )
                 )

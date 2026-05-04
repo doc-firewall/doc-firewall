@@ -11,6 +11,10 @@ class Finding:
     title: str
     explain: str
     evidence: Dict[str, Any] = field(default_factory=dict)
+    """
+    Dictionary capturing forensics of the matched threat.
+    Includes 'malicious_text' restricted to the first 250 characters.
+    """
     location: Optional[str] = None
     module: Optional[str] = None
     confidence: float = 1.0

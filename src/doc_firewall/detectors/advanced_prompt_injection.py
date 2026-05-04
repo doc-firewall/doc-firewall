@@ -152,7 +152,8 @@ class AdvancedPromptInjectionDetector(Detector):
                         severity=Severity.HIGH,
                         confidence=1.0,
                         title="Known Prompt Injection Pattern",
-                        explain=f"Aho-Corasick detected known prompt injection phrase: '{original_value}'"
+                        explain=f"Aho-Corasick detected known prompt injection phrase: '{original_value}'",
+                        evidence={"malicious_text": original_value}
                     ))
                     break # Single detection is enough to flag
 
@@ -177,7 +178,8 @@ class AdvancedPromptInjectionDetector(Detector):
                                 severity=Severity.HIGH,
                                 confidence=round(float(score), 2),
                                 title="Zero-Day Semantic Prompt Injection",
-                                explain=f"Local BERT model detected zero-day semantic prompt injection (Label: {label})"
+                                explain=f"Local BERT model detected zero-day semantic prompt injection (Label: {label})",
+                                evidence={"label": label, "score": score, "malicious_text": text_chunk[:250]}
                             ))
                 except Exception as e:
                     logger.warning(f"BERT Inference failed: {e}")
