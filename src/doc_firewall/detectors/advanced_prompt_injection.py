@@ -298,5 +298,3 @@ class AdvancedPromptInjectionDetector(Detector):
                     logger.warning(f"BERT inference failed: {e}")
 
         return findings
-
-        return findings
