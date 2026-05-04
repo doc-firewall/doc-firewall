@@ -73,6 +73,8 @@ def scan_dataset_file(file_rel_path, label, config_overrides=None):
                          print(f"    Matches: {f.evidence['matches']}")
                     else:
                          print(f"    Evidence: {f.evidence}")
+                    if "malicious_text" in f.evidence:
+                         print(f"    Malicious Text (max 250 chars): {f.evidence['malicious_text']}")
         else:
             print("❌ FAILED: No threats detected.")
             
