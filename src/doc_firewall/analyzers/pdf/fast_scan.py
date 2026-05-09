@@ -82,6 +82,7 @@ def fast_scan_pdf(file_path: str, config: ScanConfig) -> List[Finding]:
                         token.decode("ascii", errors="ignore")
                     ),
                     evidence={"token": token.decode("ascii", errors="ignore")},
+                    confidence=0.65,
                     module="fast_scan.pdf.tokens",
                 )
             )
