@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.10] - 2026-05-09
+
+### Security
+- Bumped `python-multipart` 0.0.26 → 0.0.27 (DoS, GitHub Advisory #22), `lxml` 6.0.2 → 6.1.0 (CVE-2026-41066), `pygments` 2.19.2 → 2.20.0 (CVE-2026-4539), `python-dotenv` 1.2.1 → 1.2.2 (CVE-2026-28684), `pytest` floor → ≥ 9.0.3 (CVE-2025-71176).
+
+### Added
+- **Four-layer prompt-injection pipeline (T4):** normalization (homoglyph/BIDI stripping) → Aho-Corasick → regex fuzzy matching → sliding-window BERT (`ProtectAI/deberta-v3-base-prompt-injection-v2`, threshold 0.85) → optional semantic NN (`enable_semantic_nn`). Replaces the previous single-pass exact matcher.
+- **Adversarial benchmark suite:** `scripts/benchmark_prompt_injection.py` (36 OWASP LLM01 probes, CI gate), `scripts/fetch_adversarial_dataset.py`, `scripts/calibrate_thresholds.py` (AUC = 1.0 on 1 185 records).
+- **40-test adversarial suite** (`tests/test_adversarial.py`) covering all threat categories, homoglyph/BIDI mutation bypasses, and benign-resume FP regressions.
+
+### Fixed
+- **`NameError` crash** in `embedded_payload.py` — `content` variable undefined in suspicious-script evidence dict; renamed to `text`.
+- **Attacker-exploitable bypass** in `advanced_prompt_injection.py` — hardcoded early-exit on `"override all evaluations"` + `"score: 10"` allowed suppression of the entire detector; removed.
+- **Obfuscation silently suppressed injection detection** — detector returned immediately on any zero-width/BIDI content; now normalizes and continues scanning.
+- **BERT threshold was dead code** — hardcoded at `0.99999`; lowered to `0.85` and exposed as `ScanConfig.bert_confidence_threshold`.
+- **BERT only scanned first 2 000 chars** — replaced with full-document sliding-window chunking (`bert_max_chunks`, default 20).
+- **ATS keyword list false positives** — removed 20 common resume-skill words (`python`, `java`, `sql`, etc.) from the default list; retained only injection-style command tokens.
+- **Risk scores inflated** — `Finding.confidence` default changed from `1.0` → `0.5`; duplicate findings per `threat_id` now take max confidence instead of stacking multiplicatively.
+- **Docling OCR warning on every Docker scan** — `format_options` dict was keyed by class object instead of `InputFormat.PDF` enum, silently ignoring `do_ocr=False`.
+
+### Changed
+- Hidden-text detection expanded across all four formats: DOCX (near-white color, tiny font, vanish, off-page), XLSX (near-white fill, `;;;` format, hidden rows/cols), PPTX (near-white color, tiny font, hidden shapes, off-slide EMU), PDF (`1.0 1.0 1.0 rg`, `3 Tr` invisible mode, sub-1pt `Tf`).
+- FLAG/BLOCK thresholds (0.35/0.70) confirmed empirically via ROC sweep; documented in `docs/risk_model.md`.
+- Pydantic V2 migration: all `Settings` classes use `model_config = SettingsConfigDict(...)`.
+- Benchmark (real-world, 500 probes): L1+L2 recall 49 %, precision 100 %; +BERT recall 62.5 %, precision 99.1 %, 51 ms avg.
+
 ## [0.3.8] - 2026-05-02
 
 ### Fixed

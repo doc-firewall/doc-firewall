@@ -17,7 +17,10 @@ class Finding:
     """
     location: Optional[str] = None
     module: Optional[str] = None
-    confidence: float = 1.0
+    # Default is 0.5 (neutral/unknown) rather than 1.0 to prevent unset
+    # findings from contributing full weight to the risk score (R1).
+    # Detectors that have calibrated confidence should set this explicitly.
+    confidence: float = 0.5
     weight: float = 0.0  # Effective weight calculated by Risk Model
 
 

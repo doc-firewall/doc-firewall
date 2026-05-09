@@ -1,4 +1,5 @@
 from __future__ import annotations
+import re
 import zipfile
 from typing import List
 
@@ -15,6 +16,30 @@ STEALTH_CHARS = [
     (b"\xe2\x80\x8b", "Zero Width Space"),
     (b"\xe2\x80\xae", "Right-to-Left Override"),
 ]
+
+# ── Hidden content patterns (H1 parity for XLSX) ──────────────────────────
+# 1. Near-white cell color in xl/styles.xml: ARGB "FF" + RGB ∈ [EF]{6}
+#    R,G,B ≥ 0xEE (238/255) = invisible on white sheet.
+_XLSX_WHITE_COLOR_RE = re.compile(
+    rb'<color\s+rgb="FF([EF]{6})"', re.IGNORECASE
+)
+# 2. Hide-all custom number format ";;;" — renders no value for any cell type
+_XLSX_HIDE_ALL_RE = re.compile(rb'formatCode=";;;"', re.IGNORECASE)
+# 3. Hidden rows / columns in worksheet XML
+_XLSX_HIDDEN_ROW_RE = re.compile(rb'<row\b[^>]+\bhidden="1"')
+_XLSX_HIDDEN_COL_RE = re.compile(rb'<col\b[^>]+\bhidden="1"')
+
+
+def _check_hidden_xlsx_styles(content: bytes) -> list[tuple[str, str]]:
+    """Detect hidden-text techniques in xl/styles.xml bytes."""
+    hits: list[tuple[str, str]] = []
+    m = _XLSX_WHITE_COLOR_RE.search(content)
+    if m:
+        hits.append(("white_color", f"near-white cell color: #{m.group(1).decode()}"))
+    if _XLSX_HIDE_ALL_RE.search(content):
+        hits.append(("hide_all_format", 'hide-all number format ";;;" found'))
+    return hits
+
 
 def fast_scan_xlsx(file_path: str, config: ScanConfig) -> List[Finding]:
     """Fast structural scan of an XLSX (ZIP-based) file."""
@@ -192,6 +217,30 @@ def fast_scan_xlsx(file_path: str, config: ScanConfig) -> List[Finding]:
                 except Exception as e:
                     logger.debug("Error reading %s: %s", z.filename, e)
 
+            # Hidden content in styles (white-color cells, hide-all number format)
+            if z.filename == "xl/styles.xml":
+                try:
+                    with zf.open(z) as f:
+                        styles_content = f.read(512 * 1024)
+                    for technique, detail in _check_hidden_xlsx_styles(styles_content):
+                        findings.append(
+                            Finding(
+                                threat_id=ThreatID.T3_OBFUSCATION,
+                                severity=Severity.HIGH,
+                                title=f"XLSX Hidden Text Technique ({technique})",
+                                explain=(
+                                    f"Detected {detail} in xl/styles.xml. "
+                                    "Cell content styled to be invisible to human "
+                                    "readers but present in the data stream."
+                                ),
+                                evidence={"technique": technique, "detail": detail},
+                                confidence=0.90,
+                                module="fast_scan.xlsx.hidden_text",
+                            )
+                        )
+                except Exception as e:
+                    logger.debug("Error reading xl/styles.xml: %s", e)
+
             # Formula / DDE injection — scan worksheet XML for =,+,-,@ starts
             # Also keyword scan in sheet content
             if z.filename.startswith("xl/worksheets/sheet") and z.filename.endswith(
@@ -264,6 +313,40 @@ def fast_scan_xlsx(file_path: str, config: ScanConfig) -> List[Finding]:
                                     module="fast_scan.xlsx.stealth",
                                 )
                             )
+
+                    # H1 parity: hidden rows / columns
+                    if _XLSX_HIDDEN_ROW_RE.search(content):
+                        findings.append(
+                            Finding(
+                                threat_id=ThreatID.T3_OBFUSCATION,
+                                severity=Severity.HIGH,
+                                title="XLSX Hidden Rows Detected",
+                                explain=(
+                                    f"Worksheet {z.filename} contains rows with "
+                                    'hidden="1" — content invisible to the user '
+                                    "but readable by parsers and ATS systems."
+                                ),
+                                evidence={"part": z.filename, "technique": "hidden_row"},
+                                confidence=0.90,
+                                module="fast_scan.xlsx.hidden_text",
+                            )
+                        )
+                    if _XLSX_HIDDEN_COL_RE.search(content):
+                        findings.append(
+                            Finding(
+                                threat_id=ThreatID.T3_OBFUSCATION,
+                                severity=Severity.HIGH,
+                                title="XLSX Hidden Columns Detected",
+                                explain=(
+                                    f"Worksheet {z.filename} contains columns with "
+                                    'hidden="1" — content invisible to the user '
+                                    "but readable by parsers and ATS systems."
+                                ),
+                                evidence={"part": z.filename, "technique": "hidden_col"},
+                                confidence=0.90,
+                                module="fast_scan.xlsx.hidden_text",
+                            )
+                        )
                 except Exception as e:
                     logger.debug("Error reading %s: %s", z.filename, e)
 

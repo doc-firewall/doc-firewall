@@ -31,20 +31,31 @@ class RiskModel:
     def calculate_risk(self, findings: List[Finding]) -> float:
         """
         Probabilistic scoring: risk = 1 - Π(1 - weight * severity * confidence)
+
+        De-duplication (R3): when multiple findings reference the same
+        malicious_text artifact, only the highest-confidence one per
+        threat_id group is kept.  This prevents two weak signals on the
+        same piece of text from multiplying into a BLOCK verdict.
         """
-        prod = 1.0
+        # Group by (threat_id, malicious_text_fingerprint); keep max confidence.
+        best: dict[tuple, Finding] = {}
         for f in findings:
+            artifact = (f.evidence or {}).get("malicious_text", "")
+            # Truncate fingerprint to 80 chars to handle minor snippet differences
+            key = (f.threat_id, artifact[:80])
+            existing = best.get(key)
+            if existing is None or f.confidence > existing.confidence:
+                best[key] = f
+
+        deduplicated = list(best.values())
+
+        prod = 1.0
+        for f in deduplicated:
             w_threat = self.threat_weights.get(f.threat_id, 0.5)
             w_sev = self.severity_weights.get(f.severity, 0.5)
-            # Ensure confidence is 0.0-1.0. If missing, assume 1.0?
-            # Finding usually has confidence. Let's assume it's exposed or default to
-            # 1.0 if not.
-            # Assuming Finding object has confidence attribute, if not we need to
-            # update Finding.
-            confidence = getattr(f, "confidence", 1.0)
-
+            confidence = f.confidence  # Finding.confidence defaults to 0.5 (R1)
             p_detection = w_threat * w_sev * confidence
-            prod *= 1.0 - max(0.0, min(1.0, p_detection))  # Clamp probability
+            prod *= 1.0 - max(0.0, min(1.0, p_detection))
 
         return 1.0 - prod
 

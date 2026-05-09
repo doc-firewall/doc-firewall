@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc-firewall"
-version = "0.3.9"
+version = "0.3.10"
 description = "LLM-aware document intake security scanning for PDF/DOCX/PPTX/XLSX"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -54,13 +54,13 @@ bench = [
 api = [
   "fastapi>=0.110.0",
   "uvicorn[standard]>=0.30.0",
-  "python-multipart>=0.0.26",
+  "python-multipart>=0.0.27",
   "requests>=2.32.3"
 ]
 dev = [
     "build",
     "twine",
-    "pytest",
+    "pytest>=9.0.3",
     "ruff",
 ]
 
@@ -79,6 +79,13 @@ package-dir = {"" = "src"}
 [tool.ruff]
 line-length = 88
 target-version = "py310"
+
+[tool.pytest.ini_options]
+markers = [
+    "adversarial: injection and evasion adversarial test cases",
+    "benign: false-positive regression tests (clean documents must be ALLOW)",
+    "mutation: obfuscation and bypass mutation tests",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "B"]  # Enable pycodestyle (E), Pyflakes (F), and flake8-bugbear (B)

@@ -55,6 +55,8 @@ If you plan to use the local Antivirus feature, you need `clamscan` or `clamd` i
 ### Docling
 DocFirewall uses [Docling](https://github.com/DS4SD/docling) for deep parsing. It installs its own dependencies (PyTorch, etc.). The installation process usually handles this automatically.
 
+OCR is disabled by default — DocFirewall reads the text layer of PDFs directly. No OCR engine installation is required. If you see a `"No OCR engine found"` message in logs, it can be safely ignored; it has no effect on scan accuracy.
+
 ## Docker Support
 
 For isolated environments, use the provided Docker image.

@@ -65,8 +65,8 @@ class ATSManipulationDetector(Detector):
                     is_ats = False
                     if most_common in set(config.ats_keywords):
                         is_ats = True
-                    elif most_common == "top" and "candidate" in top_tokens:
-                        is_ats = True
+                    # Removed: the old "top" + "candidate" special-case fired on
+                    # any resume that said "top candidate" naturally.
 
                     if is_ats:
                         findings.append(
