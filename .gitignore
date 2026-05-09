@@ -88,3 +88,14 @@ docker-compose.yml
 .pypirc
 test-env/
 logs/
+
+# Debug / scratch / patch / fix scripts — never commit these
+debug_*.py
+temp_*.py
+temp.py
+fix_*.py
+patch*.py
+parse_check*.py
+check_*.py
+*_patch.py
+*.py_patch.py
