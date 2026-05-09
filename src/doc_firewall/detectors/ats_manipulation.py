@@ -31,8 +31,8 @@ class ATSManipulationDetector(Detector):
             # ... (removed simple frequency check)
 
             # Check for repeated sequences (e.g. "Java Java Java Java" or "Best Candidate Best Candidate")
-            # We match 1 to 4 words repeated at least 10 times.
-            repeated_seq = re.search(r"(\b(?:\w+\s+){1,4})\1{10,}", text, flags=re.IGNORECASE)
+            # We match 1 to 6 words repeated at least 10 times (covers multi-word skill phrases).
+            repeated_seq = re.search(r"(\b(?:\w+\s+){1,6})\1{10,}", text, flags=re.IGNORECASE)
             if repeated_seq:
                 findings.append(
                     Finding(

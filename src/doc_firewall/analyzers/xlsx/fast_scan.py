@@ -325,6 +325,7 @@ def fast_scan_xlsx(file_path: str, config: ScanConfig) -> List[Finding]:
                                         "keyword": kw.decode("ascii"),
                                         "part": z.filename,
                                     },
+                                    confidence=0.65,
                                     module="fast_scan.xlsx.keywords",
                                 )
                             )
