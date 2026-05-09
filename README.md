@@ -64,6 +64,12 @@ pip install "doc-firewall[ml]"
 pip install doc-firewall
 ```
 
+**Contributing / local development** — after cloning, activate the repo's pre-commit hooks once:
+```bash
+make install-hooks
+```
+This wires up `.githooks/pre-commit`, which blocks commits containing hardcoded local paths or scratch/debug filenames.
+
 ---
 
 ## 🎯 Sample Use Case: Secure ATS (Applicant Tracking System)

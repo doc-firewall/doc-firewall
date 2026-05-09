@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# pre-commit: block commits that contain hardcoded local paths or scratch files.
+
+set -euo pipefail
+
+FAIL=0
+
+# ── 1. Reject staged files containing hardcoded home directory paths ─────────
+# Use $HOME so this hook file itself contains no literal hardcoded path.
+FORBIDDEN_PATHS=(
+    "$HOME"
+)
+
+for pattern in "${FORBIDDEN_PATHS[@]}"; do
+    # git diff --cached -U0 shows only staged lines; grep -l lists matching files
+    matches=$(git diff --cached -U0 | grep "^+" | grep -v "^+++" | grep -F "$pattern" || true)
+    if [[ -n "$matches" ]]; then
+        echo "❌  pre-commit: staged diff contains hardcoded path '$pattern'"
+        echo "    Move this file to utility_scripts/ or replace the path with a"
+        echo "    relative path / environment variable before committing."
+        echo ""
+        echo "$matches" | head -5
+        FAIL=1
+    fi
+done
+
+# ── 2. Reject scratch/debug/temp/patch file names being staged ───────────────
+SCRATCH_PATTERNS=(
+    "debug_*.py"
+    "temp_*.py"
+    "temp.py"
+    "fix_*.py"
+    "patch*.py"
+    "parse_check*.py"
+    "check_*.py"
+    "*_patch.py"
+    "*.py_patch.py"
+)
+
+staged_files=$(git diff --cached --name-only)
+
+for pat in "${SCRATCH_PATTERNS[@]}"; do
+    # Use bash glob matching against each staged filename
+    while IFS= read -r f; do
+        base=$(basename "$f")
+        if [[ $base == $pat ]]; then
+            echo "❌  pre-commit: staged file matches scratch pattern '$pat': $f"
+            echo "    Move to utility_scripts/ or rename before committing."
+            FAIL=1
+        fi
+    done <<< "$staged_files"
+done
+
+if [[ $FAIL -ne 0 ]]; then
+    echo ""
+    echo "Commit blocked. Fix the issues above and try again."
+    exit 1
+fi
+
+exit 0
