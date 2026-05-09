@@ -162,6 +162,17 @@ class AdvancedPromptInjectionDetector(Detector):
         findings = []
         raw_text = getattr(doc, 'text', '') or ""
 
+        # Fallback for PDFs where docling classifies all text as furniture
+        # (page_header), leaving doc.text empty. Extract text from the docling
+        # metadata 'texts' list so BERT and fuzzy regex can still analyse the
+        # document content.
+        if not raw_text.strip() and isinstance(doc.metadata, dict):
+            meta_texts = doc.metadata.get('texts', [])
+            raw_text = " ".join(
+                t['text'] for t in meta_texts
+                if isinstance(t, dict) and t.get('text', '').strip()
+            )
+
         if not raw_text.strip():
             return findings
 
