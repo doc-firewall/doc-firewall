@@ -214,10 +214,11 @@ def fast_scan_docx(file_path: str, config: ScanConfig) -> List[Finding]:
                                         severity=Severity.MEDIUM,
                                         title="Potential Injection Keyword (Fast Scan)",
                                         explain=(
-                                            f"Found keyword '{kw.decode('ascii')}' "
+                                            f"Found keyword '{kw.decode('ascii', errors='replace')}' "
                                             "in document.xml."
                                         ),
-                                        evidence={"keyword": kw.decode("ascii")},
+                                        evidence={"keyword": kw.decode("ascii", errors="replace")},
+                                        confidence=0.65,
                                         module="fast_scan.docx.keywords",
                                     )
                                 )
