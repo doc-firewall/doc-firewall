@@ -82,26 +82,30 @@ def fast_scan_pdf(file_path: str, config: ScanConfig) -> List[Finding]:
                         token.decode("ascii", errors="ignore")
                     ),
                     evidence={"token": token.decode("ascii", errors="ignore")},
+                    confidence=0.65,
                     module="fast_scan.pdf.tokens",
                 )
             )
 
-    # 2. Prompt Injection Soft Signals
-    # DISABLED: We disable early T4 detection in Fast Scan because it cannot
-    # distinguish between Body text and Metadata (T8). The Deep Parser + T4
-    # Detector is robust enough to catch these without generating FPs on T8 files.
-
-    # data_lower = data.lower()
-    # for kw in config.prompt_injection_keywords_bytes:
-    #     if kw in data_lower:
-    #         findings.append(Finding(
-    #             threat_id=ThreatID.T4_PROMPT_INJECTION,
-    #             severity=Severity.MEDIUM, # Trigger deep scan
-    #             title="Potential Injection Keyword (Fast Scan)",
-    #             explain=f"Found keyword '{kw.decode('ascii')}' in raw stream.",
-    #             evidence={"keyword": kw.decode('ascii')},
-    #             module="fast_scan.pdf.keywords"
-    #         ))
+    # 2. Prompt Injection Keyword Scan
+    # Scan raw PDF content streams for known injection keywords.
+    # NOTE: These are searched as bytes in uncompressed streams. Compressed
+    # streams (FlateDecode) won't be matched here — those rely on deep parse.
+    # We keep confidence low (0.50) to avoid FPs from coincidental metadata.
+    data_lower = data.lower()
+    seen_pdf_kw: set[bytes] = set()
+    for kw in config.prompt_injection_keywords_bytes:
+        if kw in data_lower and kw not in seen_pdf_kw:
+            seen_pdf_kw.add(kw)
+            findings.append(Finding(
+                threat_id=ThreatID.T4_PROMPT_INJECTION,
+                severity=Severity.MEDIUM,
+                title="Prompt Injection Keyword in PDF Stream",
+                explain=f"Found injection keyword '{kw.decode('ascii', errors='replace')}' in raw PDF stream.",
+                evidence={"keyword": kw.decode('ascii', errors='replace')},
+                confidence=0.65,
+                module="fast_scan.pdf.keywords"
+            ))
 
     # 2b. Stealth Characters (Obfuscation)
     for char_bytes, name in STEALTH_CHARS:
@@ -130,7 +134,7 @@ def fast_scan_pdf(file_path: str, config: ScanConfig) -> List[Finding]:
     # 2c. White-on-White Stealth Text (Obfuscation / Hidden Content)
     # rg = non-stroking (fill) color; RG = stroking color.
     # Covers integer (1 1 1), float (1.0 1.0 1.0) and trailing-dot (1. 1. 1.) forms.
-    _WHITE_OP_RE = re.compile(rb"1\.?0?\s+1\.?0?\s+1\.?0?\s+r[gG]")
+    _WHITE_OP_RE = re.compile(rb"1\.?0?\s+1\.?0?\s+1\.?0?\s+[rR][gG]")
     if _WHITE_OP_RE.search(data):
         findings.append(
             Finding(

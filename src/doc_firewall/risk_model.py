@@ -13,7 +13,7 @@ class RiskModel:
             ThreatID.T2_ACTIVE_CONTENT: 0.9,
             ThreatID.T3_OBFUSCATION: 0.5,
             ThreatID.T4_PROMPT_INJECTION: 0.8,
-            ThreatID.T5_RANKING_MANIPULATION: 0.4,
+            ThreatID.T5_RANKING_MANIPULATION: 0.6,
             ThreatID.T6_DOS: 0.9,
             ThreatID.T7_EMBEDDED_PAYLOAD: 0.7,
             ThreatID.T8_METADATA_INJECTION: 0.6,
@@ -41,8 +41,9 @@ class RiskModel:
         best: dict[tuple, Finding] = {}
         for f in findings:
             artifact = (f.evidence or {}).get("malicious_text", "")
-            # Truncate fingerprint to 80 chars to handle minor snippet differences
-            key = (f.threat_id, artifact[:80])
+            # Include title so findings from different detection events don't
+            # collapse even when they share the same empty-artifact key.
+            key = (f.threat_id, f.title[:40], artifact[:80])
             existing = best.get(key)
             if existing is None or f.confidence > existing.confidence:
                 best[key] = f
