@@ -45,7 +45,7 @@ class Limits(BaseSettings):
 class Thresholds(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="DOC_FIREWALL_THRESHOLDS_")
 
-    flag: float = 0.35
+    flag: float = 0.25
     block: float = 0.70
     deep_scan_trigger: float = 0.20
 

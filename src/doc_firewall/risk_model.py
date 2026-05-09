@@ -13,7 +13,7 @@ class RiskModel:
             ThreatID.T2_ACTIVE_CONTENT: 0.9,
             ThreatID.T3_OBFUSCATION: 0.5,
             ThreatID.T4_PROMPT_INJECTION: 0.8,
-            ThreatID.T5_RANKING_MANIPULATION: 0.4,
+            ThreatID.T5_RANKING_MANIPULATION: 0.6,
             ThreatID.T6_DOS: 0.9,
             ThreatID.T7_EMBEDDED_PAYLOAD: 0.7,
             ThreatID.T8_METADATA_INJECTION: 0.6,
