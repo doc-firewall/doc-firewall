@@ -95,7 +95,7 @@ class ScanConfig(BaseSettings):
     bert_model_path: str = "ProtectAI/deberta-v3-base-prompt-injection-v2"
     # Confidence threshold for the BERT injection classifier (Layer 3).
     # Set via ROC calibration; default 0.85 is a reasonable starting point.
-    bert_confidence_threshold: float = 0.85
+    bert_confidence_threshold: float = 0.75
     # Maximum number of 500-char windows sent to BERT per document.
     bert_max_chunks: int = 20
     custom_ahocorasick_yaml_path: Optional[str] = None

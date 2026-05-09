@@ -170,6 +170,7 @@ def fast_scan_docx(file_path: str, config: ScanConfig) -> List[Finding]:
                         title="Embedded Object Found",
                         explain=f"Found embedded object '{z.filename}'.",
                         evidence={"filename": z.filename},
+                        confidence=0.65,
                         module="fast_scan.docx.ole",
                     )
                 )
@@ -191,6 +192,7 @@ def fast_scan_docx(file_path: str, config: ScanConfig) -> List[Finding]:
                                         "indicating external content fetch."
                                     ),
                                     evidence={"filename": z.filename},
+                                    confidence=0.65,
                                     module="fast_scan.docx.rels",
                                 )
                             )

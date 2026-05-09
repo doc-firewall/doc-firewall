@@ -17,6 +17,16 @@ STEALTH_CHARS = [
     (b"\xe2\x80\xae", "Right-to-Left Override"),
 ]
 
+# ── ATS manipulation stuffing patterns (T9) ──────────────────────────────
+# Unambiguously adversarial phrases injected into hidden XLSX sheets.
+_ATS_STUFFING_PATTERNS: list[tuple[bytes, str]] = [
+    (b"ignore scoring rubric", "ATS score override command"),
+    (b"top candidate top candidate top candidate", "ATS keyword stuffing"),
+    (b"hidden ats text", "ATS hidden-text injection marker"),
+    (b"bypass ats", "ATS bypass directive"),
+    (b"ats bypass", "ATS bypass directive"),
+]
+
 # ── Hidden content patterns (H1 parity for XLSX) ──────────────────────────
 # 1. Near-white cell color in xl/styles.xml: ARGB "FF" + RGB ∈ [EF]{6}
 #    R,G,B ≥ 0xEE (238/255) = invisible on white sheet.
@@ -191,6 +201,7 @@ def fast_scan_xlsx(file_path: str, config: ScanConfig) -> List[Finding]:
                             title=title,
                             explain=explain,
                             evidence=evidence,
+                            confidence=0.75,
                             module="fast_scan.xlsx.ole",
                         )
                     )
@@ -211,6 +222,7 @@ def fast_scan_xlsx(file_path: str, config: ScanConfig) -> List[Finding]:
                                         f"{z.filename}, indicating external content."
                                     ),
                                     evidence={"filename": z.filename},
+                                    confidence=0.65,
                                     module="fast_scan.xlsx.rels",
                                 )
                             )
@@ -250,6 +262,25 @@ def fast_scan_xlsx(file_path: str, config: ScanConfig) -> List[Finding]:
                     with zf.open(z) as f:
                         content = f.read(1024 * 1024)  # 1 MB cap
                     content_lower = content.lower()
+
+                    # ATS manipulation stuffing patterns
+                    for _ats_pat, _ats_desc in _ATS_STUFFING_PATTERNS:
+                        if _ats_pat in content_lower:
+                            findings.append(
+                                Finding(
+                                    threat_id=ThreatID.T9_ATS_MANIPULATION,
+                                    severity=Severity.HIGH,
+                                    title="ATS Manipulation Pattern (XLSX fast scan)",
+                                    explain=(
+                                        f"Found {_ats_desc} in {z.filename}. "
+                                        "Adversarial phrase injected to manipulate ATS scoring."
+                                    ),
+                                    evidence={"pattern": _ats_pat.decode(), "part": z.filename},
+                                    confidence=0.85,
+                                    module="fast_scan.xlsx.ats",
+                                )
+                            )
+                            break  # one T9 finding per sheet
 
                     # DDE injection heuristic: =DDE( or =CMD patterns
                     if b"=dde(" in content_lower or b"=cmd|" in content_lower:
