@@ -156,7 +156,7 @@ class EmbeddedPayloadDetector(Detector):
                             f"Detected pattern associated with script "
                             f"execution or payload delivery: {title}."
                         ),
-                        evidence={"pattern": pat, "malicious_text": content[:250]},
+                        evidence={"pattern": pat, "malicious_text": text[:250]},
                         module=self.name,
                         confidence=0.95,
                     )

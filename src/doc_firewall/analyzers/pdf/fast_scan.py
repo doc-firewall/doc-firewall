@@ -128,28 +128,68 @@ def fast_scan_pdf(file_path: str, config: ScanConfig) -> List[Finding]:
             # ))
 
     # 2c. White-on-White Stealth Text (Obfuscation / Hidden Content)
-    # PDFs with `1 1 1 rg` (white fill) + text operators hide content invisibly.
-    # This pattern is used to conceal ATS manipulation, ranking keywords, and
-    # prompt injections from human reviewers while remaining parseable.
-    WHITE_COLOR_OPS = [b"1 1 1 rg", b"1 1 1 RG"]
-    for op in WHITE_COLOR_OPS:
-        if op in data:
-            findings.append(
-                Finding(
-                    threat_id=ThreatID.T3_OBFUSCATION,
-                    severity=Severity.HIGH,
-                    title="PDF White-on-White Stealth Text",
-                    explain=(
-                        "Detected white color operator in PDF content stream. "
-                        "Text rendered in white on white background is invisible "
-                        "to humans but readable by parsers — a common technique "
-                        "for hiding adversarial content."
-                    ),
-                    evidence={"operator": op.decode(), "malicious_text": "White-on-white text operator detected in stream"},
-                    module="fast_scan.pdf.stealth",
-                )
+    # rg = non-stroking (fill) color; RG = stroking color.
+    # Covers integer (1 1 1), float (1.0 1.0 1.0) and trailing-dot (1. 1. 1.) forms.
+    _WHITE_OP_RE = re.compile(rb"1\.?0?\s+1\.?0?\s+1\.?0?\s+r[gG]")
+    if _WHITE_OP_RE.search(data):
+        findings.append(
+            Finding(
+                threat_id=ThreatID.T3_OBFUSCATION,
+                severity=Severity.HIGH,
+                title="PDF White-on-White Stealth Text",
+                explain=(
+                    "Detected white color operator in PDF content stream. "
+                    "Text rendered in white on white background is invisible "
+                    "to humans but readable by parsers — a common technique "
+                    "for hiding adversarial content."
+                ),
+                evidence={"malicious_text": "White-on-white text operator detected in stream"},
+                confidence=0.90,
+                module="fast_scan.pdf.stealth",
             )
-            break
+        )
+
+    # 2d. Invisible Text Rendering Mode (3 Tr)
+    # PDF text rendering mode 3 = invisible (clips path but draws nothing).
+    # Attackers use `3 Tr` to embed text that is absent from the screen but
+    # fully parsed by PDF readers and ATS systems.
+    _TR3_RE = re.compile(rb'(?<![0-9])3\s+Tr\b')
+    if _TR3_RE.search(data):
+        findings.append(
+            Finding(
+                threat_id=ThreatID.T3_OBFUSCATION,
+                severity=Severity.HIGH,
+                title="PDF Invisible Text Rendering Mode (3 Tr)",
+                explain=(
+                    "Detected PDF text rendering mode 3 ('3 Tr'). "
+                    "Invisible text is not shown on screen but is present "
+                    "in the byte stream and readable by parsers."
+                ),
+                evidence={"malicious_text": "Invisible text rendering mode (3 Tr) detected"},
+                confidence=0.90,
+                module="fast_scan.pdf.stealth",
+            )
+        )
+
+    # 2e. Sub-1pt Font Size (Tf operator)
+    # `/FontName 0.NNN Tf` — a font size < 1pt is effectively invisible.
+    _TINY_TF_RE = re.compile(rb'/\w+\s+0\.\d+\s+Tf\b')
+    if _TINY_TF_RE.search(data):
+        findings.append(
+            Finding(
+                threat_id=ThreatID.T3_OBFUSCATION,
+                severity=Severity.HIGH,
+                title="PDF Near-Zero Font Size (Tf)",
+                explain=(
+                    "Detected a sub-1pt font size in a PDF Tf operator. "
+                    "Text at near-zero size is invisible to human readers "
+                    "but fully extracted by parsers."
+                ),
+                evidence={"malicious_text": "Near-zero font size Tf operator detected"},
+                confidence=0.85,
+                module="fast_scan.pdf.stealth",
+            )
+        )
 
     # 3. V2 Multi-Signal Obfuscation Logic
     signals = []

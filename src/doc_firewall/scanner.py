@@ -41,6 +41,7 @@ from .detectors.hidden_text import HiddenTextDetector
 from .detectors.advanced_prompt_injection import AdvancedPromptInjectionDetector
 from .detectors.advanced_ats_manipulation import AdvancedATSNLPDetector
 from .detectors.credential_leakage import CredentialLeakageDetector
+from .detectors.injection_nn import InjectionNNDetector
 
 from .utils.hashing import sha256_file
 from .utils.mime import guess_file_type
@@ -119,6 +120,7 @@ class Scanner:
             AdvancedPromptInjectionDetector(),
             AdvancedATSNLPDetector(),
             CredentialLeakageDetector(),
+            InjectionNNDetector(),
         ]
 
     async def scan_async(self, file_path: str) -> ScanReport:

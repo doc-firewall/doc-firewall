@@ -1,10 +1,12 @@
 from __future__ import annotations
 from typing import Optional, Dict, Any
 from pydantic import Field, model_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Limits(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="DOC_FIREWALL_LIMITS_")
+
     max_mb: int = Field(10, description="Max file size in MB")
     max_pages: int = Field(1000, description="Max pages for PDF")
     max_objects: int = Field(3000, description="Max PDF objects")
@@ -41,12 +43,16 @@ class Limits(BaseSettings):
 
 
 class Thresholds(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="DOC_FIREWALL_THRESHOLDS_")
+
     flag: float = 0.35
     block: float = 0.70
     deep_scan_trigger: float = 0.20
 
 
 class AntivirusSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="DOC_FIREWALL_AV_")
+
     provider: str = "clamav"  # clamav, virustotal, generic_cli
     clamav_host: Optional[str] = "localhost"
     clamav_port: int = 3310
@@ -87,7 +93,17 @@ class ScanConfig(BaseSettings):
     enable_advanced_tfidf: bool = False
     enable_credential_entropy: bool = False
     bert_model_path: str = "ProtectAI/deberta-v3-base-prompt-injection-v2"
+    # Confidence threshold for the BERT injection classifier (Layer 3).
+    # Set via ROC calibration; default 0.85 is a reasonable starting point.
+    bert_confidence_threshold: float = 0.85
+    # Maximum number of 500-char windows sent to BERT per document.
+    bert_max_chunks: int = 20
     custom_ahocorasick_yaml_path: Optional[str] = None
+
+    # N5 — Semantic nearest-neighbour injection detector
+    enable_semantic_nn: bool = False
+    nn_model_name: str = "all-MiniLM-L6-v2"
+    nn_sim_threshold: float = 0.80
 
     # False Positive Reductions
     allow_hidden_watermarks: bool = True
@@ -95,29 +111,25 @@ class ScanConfig(BaseSettings):
     enable_pii_checks: bool = True
     enable_secrets_checks: bool = True
 
-    # ATS keywords list
+    # ATS keyword stuffing list.
+    # These should be *injection-style* ATS command phrases, NOT normal resume
+    # tech skills.  Generic words like 'python', 'java', 'candidate', 'top',
+    # 'developer' have been removed to prevent false positives on legitimate
+    # resumes.  The stuffing detector's frequency threshold (8%) catches
+    # mechanical repetition; this list gates which *token* triggers the flag.
     ats_keywords: list[str] = Field(
         default_factory=lambda: [
-            "python",
-            "java",
-            "sql",
-            "aws",
-            "docker",
-            "developer",
-            "engineer",
-            "candidate",
-            "top",
-            "skills",
-            "experience",
-            "senior",
-            "cloud",
-            "agile",
-            "management",
-            "years",
-            "expert",
-            "data",
-            "software",
-            "development",
+            # ATS scoring manipulation commands
+            "passthrough",
+            "rankfirst",
+            "autoapprove",
+            "scoreboost",
+            "whitelist",
+            "bypasscheck",
+            "forcehire",
+            "highscore",
+            "overridereject",
+            "guaranteedhire",
         ]
     )
 
@@ -214,10 +226,10 @@ class ScanConfig(BaseSettings):
     antivirus_engine: Optional[Any] = None
     context: Dict[str, Any] = Field(default_factory=dict)
 
-    class Config:
-        env_prefix = "DOC_FIREWALL_"
-        env_nested_delimiter = "__"
-        scope = "local"  # or 'global' but Settings is usually singleton
+    model_config = SettingsConfigDict(
+        env_prefix="DOC_FIREWALL_",
+        env_nested_delimiter="__",
+    )
 
     @classmethod
     def from_yaml(cls, path: str) -> "ScanConfig":

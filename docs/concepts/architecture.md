@@ -48,9 +48,9 @@ Scans the raw binary stream without parsing the document structure.
 
 ## 4. Deep Scan (Parsed)
 If the file passes Fast Scan, it is parsed into a standardized logical representation (text blocks, key-value metadata).
--   **Parsers**: `docling` (default), `pypdf`, `python-docx`.
--   **OCR**: Optionally enabled for scanned PDFs using RapidOCR.
+-   **Parsers**: `docling` (default, with OCR disabled — text-based PDFs only), `pypdf`, `python-docx`.
+-   **OCR**: Not used by default. DocFirewall scans the text layer; OCR is not required for prompt injection or hidden-text detection.
 
 ## 5. Offline Intelligence (Zero-API Execution)
-All processing—including advanced NLP chunking, deep learning BERT sequence classification (Zero-Day Prompt Injection), Aho-Corasick automaton generation, and mathematical metrics (Shannon Entropy) runs **strictly locally on CPU/GPU architecture**. 
-There are **zero external API calls**, protecting PII immediately by default and maintaining strict data residency compliance without relying on third-party LLMs like OpenAI or Anthropic.
+All processing—including obfuscation normalization (Layer 0), Aho-Corasick phrase matching (Layer 1, < 1 ms), regex fuzzy patterns (Layer 2, < 1 ms), sliding-window BERT sequence classification (Layer 3, ~50 ms with local DeBERTa weights), and optional semantic nearest-neighbour matching (Layer 4)—runs **strictly locally on CPU/GPU architecture**.
+There are **zero external API calls**, protecting PII immediately by default and maintaining strict data residency compliance without relying on third-party services.

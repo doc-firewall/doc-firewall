@@ -23,6 +23,7 @@ os.environ["RAPIDOCR_DISABLE_AUTO_DOWNLOAD"] = "1"
 try:
     from docling.document_converter import DocumentConverter, PdfFormatOption
     from docling.datamodel.pipeline_options import PdfPipelineOptions
+    from docling.datamodel.document import InputFormat
 
     HAS_DOCLING = True
 except ImportError:
@@ -47,9 +48,16 @@ if HAS_DOCLING:
             pipeline_options.do_table_structure = False
             pipeline_options.table_structure_options.do_cell_matching = False
 
+            # Key must be InputFormat.PDF (enum), not PdfFormatOption (class).
+            # Using the wrong key causes the custom option to be silently ignored,
+            # leaving do_ocr=True on the default pipeline and triggering the
+            # "No OCR engine found" warning on Linux where ocrmac is unavailable.
+            # Also restrict allowed_formats to PDF so no other format pipeline
+            # (which would default to do_ocr=True) is registered at all.
             _cached_converter = DocumentConverter(
+                allowed_formats=[InputFormat.PDF],
                 format_options={
-                    PdfFormatOption: PdfFormatOption(pipeline_options=pipeline_options)
+                    InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
                 }
             )
         return _cached_converter

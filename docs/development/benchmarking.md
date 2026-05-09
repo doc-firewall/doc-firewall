@@ -2,6 +2,35 @@
 
 Performance is critical for high-throughput scanning. We provide tools to measure throughput (pages/sec) and accuracy (F1-score).
 
+## Prompt Injection Accuracy Benchmark
+
+A separate benchmark measures detection recall and precision on adversarial prompt-injection probes.
+
+```bash
+# Synthetic probes (36 probes, 7 OWASP LLM01 categories)
+python scripts/benchmark_prompt_injection.py
+
+# Real-world dataset (deepset/prompt-injections, 500 probes)
+# Requires: python scripts/fetch_adversarial_dataset.py --limit 500
+python scripts/benchmark_prompt_injection.py \
+  --extra-probes dataset/ow1_prompt_injections.jsonl
+
+# With BERT layer enabled (local model weights required)
+python scripts/benchmark_prompt_injection.py \
+  --extra-probes dataset/ow1_prompt_injections.jsonl \
+  --bert --out dataset/benchmark_ow1_bert.jsonl
+```
+
+Baseline results (Layers 1+2, BERT off):
+
+| Dataset | Recall | Precision | FPR | Latency |
+|---|---|---|---|---|
+| Synthetic (36 probes) | 100% | 100% | 0% | 0.04 ms |
+| Real-world (500 probes) | 49% | 100% | 0% | 0.03 ms |
+| Real-world + BERT | 63% | 99% | 0.3% | 51 ms |
+
+The benchmark exits non-zero if overall recall on the synthetic suite drops below 90%, making it suitable as a CI gate.
+
 ## Running Benchmarks
 
 DocFirewall includes a containerized benchmark environment to guarantee reproducibility across systems.

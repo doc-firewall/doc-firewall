@@ -138,6 +138,7 @@ nav:
     - Antivirus Integration: features/antivirus.md
     - Watermark Handling: features/watermarks.md
     - Metadata Security: features/metadata.md
+    - ATS Keyword Audit: features/ats-keyword-audit.md
   - API Reference:
     - Python API: api/python.md
     - CLI: api/cli.md

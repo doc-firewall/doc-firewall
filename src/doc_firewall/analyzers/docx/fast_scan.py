@@ -1,4 +1,5 @@
 from __future__ import annotations
+import re
 import zipfile
 from typing import List
 from ...enums import ThreatID, Severity
@@ -14,6 +15,53 @@ STEALTH_CHARS = [
     (b"\xe2\x80\x8b", "Zero Width Space"),
     (b"\xe2\x80\xae", "Right-to-Left Override"),
 ]
+
+# ── Hidden-text XML patterns (H1) ────────────────────────────────────────────
+# All patterns applied to raw document.xml bytes.
+
+# 1. <w:vanish/> — font property that makes a run invisible to the reader
+_VANISH_RE = re.compile(rb"<w:vanish\b[^/]*/?>")
+
+# 2. White-on-white: <w:color w:val="FFFFFF"/> (and near-white 6-hex values
+#    where all channels are EE–FF, e.g. FFFFFE / EEFFEE)
+#    Pattern: any 6-hex string composed entirely of E or F digits (covers
+#    R,G,B ≥ 0xEE = 238/255 ≈ 93% brightness — invisible on white pages).
+_WHITE_COLOR_RE = re.compile(rb'<w:color\s+w:val="([EF]{6})"\s*/?>', re.IGNORECASE)
+
+# 3. Zero / near-zero font size: <w:sz w:val="N"/> where N ≤ 4 (≤ 2 pt;
+#    OOXML uses half-points, so 4 = 2pt, 2 = 1pt, 1 = 0.5pt)
+_TINY_FONT_RE = re.compile(rb'<w:sz\s+w:val="([0-4])"\s*/?>')
+
+# 4. Off-page vertical positioning: <w:position w:val="N"/> where |N| ≥ 1440
+#    (OOXML uses half-points: 1440 half-pts = 720pt ≈ 10 inches off the page)
+_OFFPAGE_POS_RE = re.compile(rb'<w:position\s+w:val="(-?\d+)"\s*/?>')
+
+
+def _check_hidden_text_xml(content: bytes) -> list[tuple[str, str]]:
+    """Return a list of (technique, detail) tuples for any hidden-text
+    patterns found in raw document.xml bytes."""
+    hits: list[tuple[str, str]] = []
+
+    if _VANISH_RE.search(content):
+        hits.append(("vanish", "<w:vanish/> property found"))
+
+    m = _WHITE_COLOR_RE.search(content)
+    if m:
+        hits.append(("white_color", f"white text color: #{m.group(1).decode()}"))
+
+    m = _TINY_FONT_RE.search(content)
+    if m:
+        half_pts = int(m.group(1))
+        pts = half_pts / 2
+        hits.append(("tiny_font", f"font size {pts}pt (≤2pt threshold)"))
+
+    m = _OFFPAGE_POS_RE.search(content)
+    if m:
+        val = int(m.group(1))
+        if abs(val) >= 1440:
+            hits.append(("offpage", f"extreme vertical position: {val} half-pts"))
+
+    return hits
 
 def fast_scan_docx(file_path: str, config: ScanConfig) -> List[Finding]:
     findings = []
@@ -205,6 +253,35 @@ def fast_scan_docx(file_path: str, config: ScanConfig) -> List[Finding]:
                                         module="fast_scan.docx.stealth",
                                     )
                                 )
+
+                        # ── H1: Extended hidden-text detection ────────────────
+                        # Catches white-on-white, zero-size fonts, off-page
+                        # positioning — techniques missed by vanish-only checks.
+                        for technique, detail in _check_hidden_text_xml(content):
+                            _TECHNIQUE_LABELS = {
+                                "vanish": "Hidden Text (w:vanish)",
+                                "white_color": "White-on-White Text",
+                                "tiny_font": "Near-Zero Font Size",
+                                "offpage": "Off-Page Text Positioning",
+                            }
+                            title = _TECHNIQUE_LABELS.get(technique, "Hidden Text")
+                            findings.append(
+                                Finding(
+                                    threat_id=ThreatID.T3_OBFUSCATION,
+                                    severity=Severity.HIGH,
+                                    title=title,
+                                    explain=(
+                                        f"Detected hidden text technique in "
+                                        f"document.xml: {detail}. Text may be "
+                                        "invisible to readers but parsed by ATS "
+                                        "systems."
+                                    ),
+                                    evidence={"technique": technique, "detail": detail,
+                                              "malicious_text": detail},
+                                    module="fast_scan.docx.hidden_text",
+                                    confidence=0.90,
+                                )
+                            )
 
                 except Exception as e:
                     logger.debug("Error reading document.xml: %s", e)

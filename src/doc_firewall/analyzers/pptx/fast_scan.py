@@ -1,4 +1,5 @@
 from __future__ import annotations
+import re
 import zipfile
 from typing import List
 
@@ -15,6 +16,50 @@ STEALTH_CHARS = [
     (b"\xe2\x80\x8b", "Zero Width Space"),
     (b"\xe2\x80\xae", "Right-to-Left Override"),
 ]
+
+# ── Hidden content patterns (H1 parity for PPTX) ──────────────────────────
+# 1. Near-white text color in DrawingML: <a:srgbClr val="XXXXXX"> where all
+#    6 hex digits are E or F — R,G,B ≥ 0xEE = invisible on white slide.
+_PPTX_WHITE_COLOR_RE = re.compile(
+    rb'<a:srgbClr\s+val="([EF]{6})"', re.IGNORECASE
+)
+# 2. Tiny font: <a:rPr sz="N"/> where N is in hundredths of a point.
+#    sz ≤ 200 = ≤ 2pt (mirrors DOCX H1 threshold).
+_PPTX_TINY_FONT_RE = re.compile(rb'<a:rPr\b[^>]*\bsz="(\d{1,3})"')
+# 3. Hidden shapes: any element with hidden="1" (p:cNvPr, p:sp, etc.)
+_PPTX_HIDDEN_SHAPE_RE = re.compile(rb'\bhidden="1"')
+# 4. Off-slide position: <a:off x="N" y="M"/> beyond 2× slide dimensions.
+#    Standard slide: 9 144 000 × 6 858 000 EMU.
+_PPTX_OFFSLIDE_RE = re.compile(rb'<a:off\s+x="(-?\d+)"\s+y="(-?\d+)"')
+_PPTX_OFFSLIDE_X_LIMIT = 9_144_000 * 2
+_PPTX_OFFSLIDE_Y_LIMIT = 6_858_000 * 2
+
+
+def _check_hidden_pptx(content: bytes, filename: str) -> list[tuple[str, str]]:
+    """Detect hidden-text techniques in a slide XML bytes blob."""
+    hits: list[tuple[str, str]] = []
+    m = _PPTX_WHITE_COLOR_RE.search(content)
+    if m:
+        hits.append(("white_color", f"white text color: #{m.group(1).decode()}"))
+
+    m = _PPTX_TINY_FONT_RE.search(content)
+    if m:
+        hundredths = int(m.group(1))
+        if hundredths <= 200:
+            pts = hundredths / 100
+            hits.append(("tiny_font", f"font size {pts}pt (≤2pt threshold)"))
+
+    if _PPTX_HIDDEN_SHAPE_RE.search(content):
+        hits.append(("hidden_shape", 'shape/element with hidden="1" found'))
+
+    for m in _PPTX_OFFSLIDE_RE.finditer(content):
+        x, y = int(m.group(1)), int(m.group(2))
+        if abs(x) > _PPTX_OFFSLIDE_X_LIMIT or abs(y) > _PPTX_OFFSLIDE_Y_LIMIT:
+            hits.append(("offslide", f"off-slide position: x={x}, y={y} EMU"))
+            break
+
+    return hits
+
 
 def fast_scan_pptx(file_path: str, config: ScanConfig) -> List[Finding]:
     """Fast structural scan of a PPTX (ZIP-based) file."""
@@ -233,6 +278,28 @@ def fast_scan_pptx(file_path: str, config: ScanConfig) -> List[Finding]:
                                     module="fast_scan.pptx.stealth",
                                 )
                             )
+
+                    # H1 parity: white text, tiny font, hidden shapes, off-slide
+                    for technique, detail in _check_hidden_pptx(content, z.filename):
+                        findings.append(
+                            Finding(
+                                threat_id=ThreatID.T3_OBFUSCATION,
+                                severity=Severity.HIGH,
+                                title=f"PPTX Hidden Text Technique ({technique})",
+                                explain=(
+                                    f"Detected {detail} in {z.filename}. "
+                                    "Hidden text in presentations is a common "
+                                    "vector for injecting adversarial content."
+                                ),
+                                evidence={
+                                    "technique": technique,
+                                    "detail": detail,
+                                    "part": z.filename,
+                                },
+                                confidence=0.90,
+                                module="fast_scan.pptx.hidden_text",
+                            )
+                        )
                 except Exception as e:
                     logger.debug("Error reading %s: %s", z.filename, e)
 

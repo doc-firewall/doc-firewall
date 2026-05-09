@@ -120,6 +120,10 @@ thresholds:
   flag: 0.35               # Return VERDICT=FLAG
   block: 0.70              # Return VERDICT=BLOCK
 
+# Empirically calibrated via scripts/calibrate_thresholds.py (ROC-AUC = 1.0)
+# on 1 185 labeled records. Do not lower block below 0.35 without re-running
+# calibration on your dataset.
+
 limits:
   max_mb: 10               # Max file size in MB
   max_pages: 1000          # PDF page limit
@@ -129,13 +133,37 @@ limits:
 
 ## Advanced Threat Configuration
 
+### Prompt Injection Tuning
+
+The multi-layer injection detector (L0–L4) exposes several tuning knobs:
+
+```python
+config = ScanConfig(
+    # Layer 3 — local BERT classifier
+    enable_advanced_bert=True,
+    bert_model_path="ProtectAI/deberta-v3-base-prompt-injection-v2",  # local weights
+    bert_confidence_threshold=0.85,   # lower = more sensitive
+    bert_max_chunks=20,               # max sliding-window chunks per document
+
+    # Layer 4 — semantic nearest-neighbour (opt-in)
+    enable_semantic_nn=False,         # disabled by default; enable for highest recall
+    nn_model_name="all-MiniLM-L6-v2",
+    nn_sim_threshold=0.80,
+
+    # Layer 1 — custom phrases on top of built-in list
+    custom_ahocorasick_yaml_path="path/to/custom_phrases.yaml",
+)
+```
+
 ### Customizing ATS & Ranking Keywords
 To prevent heuristic overfitting, developers can define custom ATS target keywords depending on the job domain or specific organizational ranking manipulation vulnerabilities:
 
 ```python
 from doc_firewall import ScanConfig, Limits
 
-# Pass a custom list to detect domain-specific keyword stuffing
+# Pass a custom list to detect domain-specific keyword stuffing.
+# The default list contains only injection-style phrases — not skill words
+# like "python", "java", or "developer" — to avoid false positives on resumes.
 custom_config = ScanConfig(
     ats_keywords=["nursing", "medical", "registered", "certified", "healthcare"],
     limits=Limits(min_embedded_object_size_bytes=50000)
