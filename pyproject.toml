@@ -51,12 +51,6 @@ bench = [
   "pandas>=2.0.0",
   "matplotlib>=3.7.0"
 ]
-api = [
-  "fastapi>=0.110.0",
-  "uvicorn[standard]>=0.30.0",
-  "python-multipart>=0.0.27",
-  "requests>=2.32.3"
-]
 formats = [
   "striprtf>=0.0.26",
   "html5lib>=1.1"
