@@ -39,3 +39,27 @@
     options:
       show_root_heading: true
       show_source: false
+
+## `PolicyEngine`
+
+::: doc_firewall.PolicyEngine
+    handler: python
+    options:
+      show_root_heading: true
+      show_source: false
+
+## `Policy`
+
+::: doc_firewall.Policy
+    handler: python
+    options:
+      show_root_heading: true
+      show_source: false
+
+## `ModelIntegrityChecker`
+
+::: doc_firewall.security.ModelIntegrityChecker
+    handler: python
+    options:
+      show_root_heading: true
+      show_source: false

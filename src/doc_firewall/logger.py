@@ -2,7 +2,7 @@ import structlog
 import logging
 
 
-def configure_logger():
+def configure_logger() -> None:
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
@@ -18,7 +18,7 @@ def configure_logger():
     )
 
 
-def get_logger(name=None):
+def get_logger(name: object = None) -> structlog.BoundLogger:
     return structlog.get_logger(name)
 
 

@@ -162,17 +162,16 @@ def _extract_custom_properties(zf: zipfile.ZipFile) -> Dict[str, Any]:
     return meta
 
 def _extract_comments(zf: zipfile.ZipFile) -> str:
-    texts = []
+    texts: list[str] = []
     for n in zf.namelist():
         if n.startswith("xl/comments") and n.endswith(".xml"):
             try:
                 with zf.open(n) as f:
                     root = ET.parse(f).getroot()
-                # Find all text in comments
                 for t in root.itertext():
                     if t and t.strip():
                         texts.append(t.strip())
-            except Exception as e:
+            except Exception:
                 pass
     return " ".join(texts)
 

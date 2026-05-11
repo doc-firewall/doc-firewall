@@ -18,13 +18,15 @@ STEALTH_CHARS = [
 ]
 
 # ── ATS manipulation stuffing patterns (T9) ──────────────────────────────
-# Unambiguously adversarial phrases injected into hidden XLSX sheets.
-_ATS_STUFFING_PATTERNS: list[tuple[bytes, str]] = [
-    (b"ignore scoring rubric", "ATS score override command"),
-    (b"top candidate top candidate top candidate", "ATS keyword stuffing"),
-    (b"hidden ats text", "ATS hidden-text injection marker"),
-    (b"bypass ats", "ATS bypass directive"),
-    (b"ats bypass", "ATS bypass directive"),
+# Fallback used when config.ats_stuffing_patterns_bytes is unavailable
+# (e.g. older ScanConfig instances).  The canonical list lives in ScanConfig
+# so operators can extend or suppress entries without editing source.
+_ATS_STUFFING_PATTERNS_BYTES: list[bytes] = [
+    b"ignore scoring rubric",
+    b"top candidate top candidate top candidate",
+    b"hidden ats text",
+    b"bypass ats",
+    b"ats bypass",
 ]
 
 # ── Hidden content patterns (H1 parity for XLSX) ──────────────────────────
@@ -206,6 +208,55 @@ def fast_scan_xlsx(file_path: str, config: ScanConfig) -> List[Finding]:
                         )
                     )
 
+            # B.10: Power Query / external data connections — xl/connections.xml,
+            # xl/queryTables/, xl/externalLinks/ fetch remote data on open.
+            if (
+                z.filename == "xl/connections.xml"
+                or z.filename.startswith("xl/queryTables/")
+                or z.filename.startswith("xl/externalLinks/")
+            ):
+                try:
+                    with zf.open(z) as f:
+                        conn_content = f.read(64 * 1024)
+                    _HTTP_RE = re.compile(rb"https?://[^\s\"'<]{8,}", re.IGNORECASE)
+                    _http_m = _HTTP_RE.search(conn_content)
+                    if _http_m:
+                        url = _http_m.group(0)[:120].decode("ascii", errors="replace")
+                        findings.append(
+                            Finding(
+                                threat_id=ThreatID.T2_ACTIVE_CONTENT,
+                                severity=Severity.HIGH,
+                                title="XLSX External Data Connection / Power Query",
+                                explain=(
+                                    f"Outbound URL in {z.filename}: '{url}'. "
+                                    "Excel Power Query and external connections fetch "
+                                    "remote data on workbook open — a data-exfiltration "
+                                    "and remote-code-execution vector."
+                                ),
+                                evidence={"filename": z.filename, "url": url},
+                                confidence=0.85,
+                                module="fast_scan.xlsx.powerquery",
+                            )
+                        )
+                    else:
+                        findings.append(
+                            Finding(
+                                threat_id=ThreatID.T2_ACTIVE_CONTENT,
+                                severity=Severity.MEDIUM,
+                                title="XLSX External Data Connection Part",
+                                explain=(
+                                    f"Workbook contains {z.filename}, indicating "
+                                    "Power Query or external data links that can "
+                                    "fetch remote content on open."
+                                ),
+                                evidence={"filename": z.filename},
+                                confidence=0.75,
+                                module="fast_scan.xlsx.powerquery",
+                            )
+                        )
+                except Exception as e:
+                    logger.debug("Error reading %s: %s", z.filename, e)
+
             # External relationships
             if z.filename.endswith(".rels"):
                 try:
@@ -263,24 +314,52 @@ def fast_scan_xlsx(file_path: str, config: ScanConfig) -> List[Finding]:
                         content = f.read(1024 * 1024)  # 1 MB cap
                     content_lower = content.lower()
 
-                    # ATS manipulation stuffing patterns
-                    for _ats_pat, _ats_desc in _ATS_STUFFING_PATTERNS:
+                    # ATS manipulation stuffing patterns — list is config-driven
+                    # so operators can extend or suppress without editing source.
+                    _ats_patterns = getattr(
+                        config, "ats_stuffing_patterns_bytes", _ATS_STUFFING_PATTERNS_BYTES
+                    )
+                    for _ats_pat in _ats_patterns:
                         if _ats_pat in content_lower:
+                            _pat_str = _ats_pat.decode("ascii", errors="replace")
                             findings.append(
                                 Finding(
                                     threat_id=ThreatID.T9_ATS_MANIPULATION,
                                     severity=Severity.HIGH,
                                     title="ATS Manipulation Pattern (XLSX fast scan)",
                                     explain=(
-                                        f"Found {_ats_desc} in {z.filename}. "
+                                        f"Found ATS manipulation keyword "
+                                        f"'{_pat_str}' in {z.filename}. "
                                         "Adversarial phrase injected to manipulate ATS scoring."
                                     ),
-                                    evidence={"pattern": _ats_pat.decode(), "part": z.filename},
+                                    evidence={
+                                        "pattern": _pat_str,
+                                        "part": z.filename,
+                                        "malicious_text": _pat_str,
+                                    },
                                     confidence=0.85,
                                     module="fast_scan.xlsx.ats",
                                 )
                             )
                             break  # one T9 finding per sheet
+
+                    # B.10: WEBSERVICE / FILTERXML formulas make outbound HTTP calls
+                    if b"webservice(" in content_lower or b"filterxml(" in content_lower:
+                        findings.append(
+                            Finding(
+                                threat_id=ThreatID.T2_ACTIVE_CONTENT,
+                                severity=Severity.HIGH,
+                                title="XLSX WEBSERVICE/FILTERXML Formula (HTTP Exfiltration)",
+                                explain=(
+                                    f"Found WEBSERVICE() or FILTERXML() formula in "
+                                    f"{z.filename}. These Excel functions make outbound "
+                                    "HTTP requests on recalculation — a data-exfiltration vector."
+                                ),
+                                evidence={"part": z.filename},
+                                confidence=0.85,
+                                module="fast_scan.xlsx.powerquery",
+                            )
+                        )
 
                     # DDE injection heuristic: =DDE( or =CMD patterns
                     if b"=dde(" in content_lower or b"=cmd|" in content_lower:

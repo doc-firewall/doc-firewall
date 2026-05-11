@@ -12,10 +12,11 @@ logger = logging.getLogger(__name__)
 class AdvancedATSNLPDetector(Detector):
     name = "advanced_ats_nlp"
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._vectorizer = None
+        self._sem_model = None  # B.9: sentence-transformers model (lazy-loaded)
 
-    def _init_tfidf(self):
+    def _init_tfidf(self) -> None:
         if self._vectorizer is None:
             try:
                 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -23,6 +24,91 @@ class AdvancedATSNLPDetector(Detector):
                 self._vectorizer = TfidfVectorizer(stop_words='english', ngram_range=(1, 3))
             except ImportError:
                 logger.error("scikit-learn is not installed.")
+
+    def _init_semantic(self, config: ScanConfig) -> None:
+        """Lazy-load the sentence-transformer model (reuses injection_nn model)."""
+        if self._sem_model is None:
+            try:
+                from sentence_transformers import SentenceTransformer
+                self._sem_model = SentenceTransformer(config.nn_model_name)
+            except Exception:
+                self._sem_model = None
+
+    def _detect_paraphrase_stuffing(
+        self, sentences: list[str], config: ScanConfig
+    ) -> list[Finding]:
+        """B.9: Cluster sentence embeddings; flag if > 40% are semantic duplicates.
+
+        Synonym rotation ("experienced developer / skilled programmer / seasoned coder")
+        defeats TF-IDF and Jaccard but not cosine-similarity clustering over embeddings.
+        """
+        findings: list[Finding] = []
+        if not config.enable_semantic_nn:
+            return findings
+
+        self._init_semantic(config)
+        if self._sem_model is None:
+            return findings
+
+        sample = sentences[:100]  # cap to avoid OOM on adversarial documents
+        if len(sample) < 5:
+            return findings
+
+        try:
+            import numpy as np
+
+            embeddings = self._sem_model.encode(sample, convert_to_numpy=True)
+            norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+            embeddings = embeddings / np.maximum(norms, 1e-10)
+            sim_matrix = embeddings @ embeddings.T  # pairwise cosine similarity
+
+            # Union-find clustering at similarity ≥ 0.85
+            n = len(sample)
+            parent = list(range(n))
+
+            def find(x: int) -> int:
+                while parent[x] != x:
+                    parent[x] = parent[parent[x]]
+                    x = parent[x]
+                return x
+
+            for i in range(n):
+                for j in range(i + 1, n):
+                    if float(sim_matrix[i, j]) >= 0.85:
+                        ri, rj = find(i), find(j)
+                        if ri != rj:
+                            parent[ri] = rj
+
+            from collections import Counter
+            cluster_sizes = Counter(find(i) for i in range(n))
+            largest = cluster_sizes.most_common(1)[0][1]
+            ratio = largest / n
+
+            if ratio > 0.4:
+                severity = Severity.CRITICAL if ratio > 0.6 else Severity.HIGH
+                findings.append(
+                    Finding(
+                        threat_id=ThreatID.T9_ATS_MANIPULATION,
+                        severity=severity,
+                        confidence=round(float(ratio), 2),
+                        title="Semantic Paraphrase Stuffing Detected",
+                        explain=(
+                            f"{int(ratio * 100)}% of sentences are semantically "
+                            "equivalent (cosine similarity ≥ 0.85). Synonym rotation "
+                            "evades exact-token frequency checks — a sophisticated "
+                            "ATS manipulation technique."
+                        ),
+                        evidence={
+                            "semantic_cluster_ratio": round(ratio, 3),
+                            "largest_cluster_size": largest,
+                            "total_sentences": n,
+                        },
+                    )
+                )
+        except Exception as exc:
+            logger.debug("Semantic paraphrase clustering failed: %s", exc)
+
+        return findings
 
     def run(self, doc: ParsedDocument, config: ScanConfig) -> List[Finding]:
         findings = []
@@ -96,16 +182,25 @@ class AdvancedATSNLPDetector(Detector):
                     if sim > 0.95:  # tightened from 0.8
                         high_jaccard_count += 1
                 
-                # If more than 40% of consecutive sentences are 95% identical, that's ranking spam!
+                # If more than 40% of consecutive sentences are 95% identical that
+                # is ATS stuffing — sentences are copy-pasted to pad keyword density.
+                # Reclassified from T5 (ranking) to T9 (ATS manipulation) because
+                # this pattern targets ATS score inflation, not RAG ranking.
                 if float(high_jaccard_count) / len(sentences) > 0.4:
                      findings.append(Finding(
-                        threat_id=ThreatID.T5_RANKING_MANIPULATION,
+                        threat_id=ThreatID.T9_ATS_MANIPULATION,
                         severity=Severity.MEDIUM,
                         confidence=0.85,
-                        title="Semantic Repetition",
-                        explain="Jaccard similarity detected abnormally high repetition of context/role text.",
+                        title="Semantic Sentence Repetition (ATS Stuffing)",
+                        explain="Jaccard similarity detected abnormally high repetition of context/role text — characteristic of copy-pasted keyword stuffing.",
                         evidence={"malicious_text": sentences[0][:250]}
                     ))
+
+            # B.9: Semantic paraphrase stuffing — synonym rotation evades TF-IDF
+            # and Jaccard checks; embedding clustering catches it.
+            findings.extend(
+                self._detect_paraphrase_stuffing(sentences, config)
+            )
 
         except Exception as e:
             logger.warning(f"Advanced ATS NLP failed: {e}")

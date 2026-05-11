@@ -1,11 +1,11 @@
-from typing import List, Dict
+from typing import Dict, List, Optional
 from .enums import Severity, ThreatID, Verdict
 from .report import Finding
 from .config import ScanConfig
 
 
 class RiskModel:
-    def __init__(self, config: ScanConfig):
+    def __init__(self, config: ScanConfig) -> None:
         self.config = config
         # Default Weights per ThreatID
         self.threat_weights: Dict[ThreatID, float] = {
@@ -18,6 +18,9 @@ class RiskModel:
             ThreatID.T7_EMBEDDED_PAYLOAD: 0.7,
             ThreatID.T8_METADATA_INJECTION: 0.6,
             ThreatID.T9_ATS_MANIPULATION: 0.5,
+            ThreatID.T10_INDIRECT_INJECTION: 0.8,
+            ThreatID.T11_RAG_POISONING: 0.8,
+            ThreatID.T12_SOCIAL_ENGINEERING: 0.75,
         }
 
         # Severity mappings
@@ -28,7 +31,11 @@ class RiskModel:
             Severity.CRITICAL: 1.00,
         }
 
-    def calculate_risk(self, findings: List[Finding]) -> float:
+    def calculate_risk(
+        self,
+        findings: List[Finding],
+        custom_threat_weights: Optional[Dict[str, float]] = None,
+    ) -> float:
         """
         Probabilistic scoring: risk = 1 - Π(1 - weight * severity * confidence)
 
@@ -38,21 +45,39 @@ class RiskModel:
         same piece of text from multiplying into a BLOCK verdict.
         """
         # Group by (threat_id, malicious_text_fingerprint); keep max confidence.
+        #
+        # Key strategy: when the finding carries a non-empty malicious_text
+        # artifact, deduplicate purely on (threat_id, artifact) — this collapses
+        # the fast-scan T4 byte hit and the deep-scan T4 pattern match for the
+        # same keyword into a single finding (the higher-confidence one wins).
+        # When the artifact is empty, include title to prevent unrelated findings
+        # — e.g. two distinct T6 timeout findings — from wrongly merging.
         best: dict[tuple, Finding] = {}
         for f in findings:
             artifact = (f.evidence or {}).get("malicious_text", "")
-            # Include title so findings from different detection events don't
-            # collapse even when they share the same empty-artifact key.
-            key = (f.threat_id, f.title[:40], artifact[:80])
+            if artifact:
+                key: tuple = (f.threat_id, artifact[:80])
+            else:
+                key = (f.threat_id, f.title[:40], "")
             existing = best.get(key)
             if existing is None or f.confidence > existing.confidence:
                 best[key] = f
 
         deduplicated = list(best.values())
 
+        # Merge in policy-level overrides (keyed by ThreatID.value string)
+        effective_weights = dict(self.threat_weights)
+        if custom_threat_weights:
+            for key, val in custom_threat_weights.items():
+                try:
+                    tid = ThreatID(key)
+                    effective_weights[tid] = float(val)
+                except ValueError:
+                    pass  # Unknown key — ignore rather than crash
+
         prod = 1.0
         for f in deduplicated:
-            w_threat = self.threat_weights.get(f.threat_id, 0.5)
+            w_threat = effective_weights.get(f.threat_id, 0.5)
             w_sev = self.severity_weights.get(f.severity, 0.5)
             confidence = f.confidence  # Finding.confidence defaults to 0.5 (R1)
             p_detection = w_threat * w_sev * confidence

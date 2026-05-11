@@ -3,22 +3,20 @@ import time
 
 
 class Timer:
-    def __init__(self):
+    """Context manager that records elapsed time in milliseconds."""
+
+    def __init__(self) -> None:
         self._start = 0.0
         self._end = 0.0
 
-    def __enter__(self):
+    def __enter__(self) -> "Timer":
         self._start = time.perf_counter()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, *_args: object) -> None:
         self._end = time.perf_counter()
 
     @property
     def duration_ms(self) -> float:
         end = self._end if self._end > 0 else time.perf_counter()
         return (end - self._start) * 1000.0
-
-
-def timer():
-    return Timer()

@@ -40,20 +40,33 @@ _ZERO_WIDTH_RE = re.compile(
 # when you have evidence it's used in injection attacks.
 
 _HOMOGLYPH_MAP: dict[int, str] = {
-    # Cyrillic
+    # Cyrillic lowercase — look identical to Latin lowercase
     ord("а"): "a",  ord("е"): "e",  ord("о"): "o",  ord("р"): "p",
     ord("с"): "c",  ord("х"): "x",  ord("у"): "y",  ord("і"): "i",
     ord("ё"): "e",  ord("ѕ"): "s",  ord("ј"): "j",  ord("ԁ"): "d",
-    # Greek
+    # B.11: Cyrillic UPPERCASE homoglyphs — the most commonly abused set.
+    # Each maps to its lowercase Latin lookalike (step 5 lowercases everything).
+    ord("А"): "a",  # U+0410 ≡ Latin A
+    ord("В"): "b",  # U+0412 ≡ Latin B
+    ord("С"): "c",  # U+0421 ≡ Latin C
+    ord("Е"): "e",  # U+0415 ≡ Latin E
+    ord("Н"): "h",  # U+041D ≡ Latin H
+    ord("К"): "k",  # U+041A ≡ Latin K
+    ord("М"): "m",  # U+041C ≡ Latin M
+    ord("О"): "o",  # U+041E ≡ Latin O
+    ord("Р"): "r",  # U+0420 ≡ Latin R (NB: lowercase р → p, uppercase Р → r)
+    ord("Т"): "t",  # U+0422 ≡ Latin T
+    ord("Х"): "x",  # U+0425 ≡ Latin X
+    # Greek lowercase
     ord("α"): "a",  ord("β"): "b",  ord("γ"): "y",  ord("ε"): "e",
     ord("ζ"): "z",  ord("η"): "n",  ord("ι"): "i",  ord("κ"): "k",
     ord("μ"): "u",  ord("ν"): "v",  ord("ο"): "o",  ord("ρ"): "p",
     ord("τ"): "t",  ord("υ"): "u",  ord("χ"): "x",
     # Fullwidth ASCII (！ … ～)
     **{cp: chr(cp - 0xFEE0) for cp in range(0xFF01, 0xFF5F)},
-    # Latin look-alikes
-    ord("ı"): "i",  ord("ℓ"): "l",  ord("ℐ"): "i",  ord("Ι"): "i",
-    ord("Ο"): "o",  ord("Α"): "a",  ord("Β"): "b",  ord("Ε"): "e",
+    # Latin look-alikes and Greek uppercase
+    ord("ı"): "i",  ord("ℓ"): "l",  ord("ℐ"): "i",
+    ord("Α"): "a",  ord("Β"): "b",  ord("Ε"): "e",
     ord("Ζ"): "z",  ord("Η"): "h",  ord("Ι"): "i",  ord("Κ"): "k",
     ord("Μ"): "m",  ord("Ν"): "n",  ord("Ο"): "o",  ord("Ρ"): "p",
     ord("Τ"): "t",  ord("Υ"): "y",  ord("Χ"): "x",

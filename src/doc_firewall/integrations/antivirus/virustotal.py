@@ -16,7 +16,7 @@ logger = get_logger()
 class VirusTotalEngine(AntivirusEngine):
     name: str = "virustotal"
 
-    def __init__(self, api_key: str | None = None):
+    def __init__(self, api_key: str | None = None) -> None:
         self.api_key = api_key or os.environ.get("VT_API_KEY")
         if not self.api_key:
             raise ValueError(

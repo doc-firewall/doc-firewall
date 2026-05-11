@@ -40,11 +40,23 @@ class EmbeddedPayloadDetector(Detector):
         findings = []
         text = doc.text or ""
 
-        # 1. Base64 Blocks > 1KB
-        # Base64 chars: A-Z, a-z, 0-9, +, /, and = padding.
-        # Length 1KB approx 1366 chars.
-        b64_long = re.compile(r"[A-Za-z0-9+/]{1024,}={0,2}")
-        for match in b64_long.finditer(text):
+        # 1. Base64 Payload Detection (hardened — item 0.7)
+        # Matches both standard (+/) and URL-safe (-_) Base64 alphabets.
+        # Minimum size lowered from 1366 to 200 chars for deep scan (catches stubs).
+        # Entropy threshold lowered from 4.5 to 3.5 (catches PowerShell ~4.1).
+        # Secondary "dangerous content" check bypasses entropy for high-risk decoded blobs.
+        # Multi-level decode: up to 3 layers (catches double-encoded payloads).
+        _DANGEROUS_DECODED = re.compile(
+            rb"import|eval|exec|powershell|wget|curl|MZ\x90|"
+            rb"\x7fELF|/bin/sh|cmd\.exe",
+            re.IGNORECASE,
+        )
+        _B64_RE = re.compile(r"[A-Za-z0-9+/\-_]{200,}={0,2}")
+
+        b64_reported = False
+        for match in _B64_RE.finditer(text):
+            if b64_reported:
+                break
             blob = match.group(0)
             # Filter out common benign Base64 usage
             if (
@@ -54,33 +66,58 @@ class EmbeddedPayloadDetector(Detector):
             ):
                 continue
 
-            # Heuristic: payload usually high entropy.
-            # Text-like base64 has specific char distribution?
-            # For now, just rely on valid exclusions.
-
-            # Entropy Check (Production Generalization)
-            # High entropy (>4.5) suggests compressed or encrypted payload.
-            # Low entropy suggests simple text or repetitive patterns (benign).
             ent = self._calculate_shannon_entropy(blob)
-            if ent < 4.5:
+            # Multi-level decode: attempt up to 3 decode rounds
+            decoded_payload: bytes | None = None
+            current = blob
+            for _level in range(3):
+                try:
+                    # Normalise URL-safe alphabet before decoding
+                    standard = current.replace("-", "+").replace("_", "/")
+                    # Pad to 4-byte boundary
+                    pad = (4 - len(standard) % 4) % 4
+                    decoded = base64.b64decode(standard + "=" * pad)
+                    if len(decoded) > 10:
+                        decoded_payload = decoded
+                        # Try another round if result is still valid Base64
+                        try:
+                            current = decoded.decode("ascii", errors="strict")
+                            if not re.match(r"^[A-Za-z0-9+/\-_\s=]+$", current):
+                                break
+                        except UnicodeDecodeError:
+                            break
+                except Exception:
+                    break
+
+            # Flag if: entropy >= 3.5 OR decoded content contains dangerous keywords
+            dangerous = bool(decoded_payload and _DANGEROUS_DECODED.search(decoded_payload))
+            if ent < 3.5 and not dangerous:
                 continue
 
+            severity = Severity.CRITICAL if dangerous else Severity.HIGH
             findings.append(
                 Finding(
                     threat_id=ThreatID.T7_EMBEDDED_PAYLOAD,
-                    severity=Severity.HIGH,
-                    title="Large Base64 Block Detected",
+                    severity=severity,
+                    title="Base64 Encoded Payload Detected",
                     explain=(
-                        "Found a base64-encoded block larger than 1KB, which may "
-                        "contain a concealed payload. (Common formats excluded)"
+                        "Found a Base64-encoded block that may contain a concealed "
+                        "payload. Entropy: {:.2f}. Dangerous content: {}.".format(
+                            ent, dangerous
+                        )
                     ),
-                    evidence={"type": "base64", "length": len(blob), "malicious_text": blob[:250]},
+                    evidence={
+                        "type": "base64",
+                        "length": len(blob),
+                        "entropy": round(ent, 2),
+                        "dangerous_decoded": dangerous,
+                        "malicious_text": blob[:250],
+                    },
                     module=self.name,
-                    confidence=0.9,
+                    confidence=0.95 if dangerous else 0.80,
                 )
             )
-            # Just report once to avoid noise
-            break
+            b64_reported = True
 
         # Check raw hex blobs from metadata (for PDF fallback)
         if doc.metadata and "hex_blobs" in doc.metadata:
@@ -265,6 +302,75 @@ class EmbeddedPayloadDetector(Detector):
                             module="embedded_payload.fast",
                         )
                     )
+
+            # 4. Appended-data detection (item 0.13)
+            # Data after a known end-of-file marker is a steganographic payload carrier.
+            TAIL_SIZE = 1024
+            with open(file_path, "rb") as f:
+                f.seek(0, 2)
+                file_size = f.tell()
+                if file_size > TAIL_SIZE:
+                    f.seek(-TAIL_SIZE, 2)
+                    tail = f.read(TAIL_SIZE)
+                else:
+                    f.seek(0)
+                    tail = f.read()
+
+            # PDF: data after %%EOF
+            if file_path.lower().endswith(".pdf"):
+                eof_idx = tail.rfind(b"%%EOF")
+                if eof_idx != -1:
+                    after = tail[eof_idx + 5:].strip()
+                    if after and not after.isspace():
+                        findings.append(Finding(
+                            threat_id=ThreatID.T7_EMBEDDED_PAYLOAD,
+                            severity=Severity.MEDIUM,
+                            title="PDF: Data Appended After %%EOF",
+                            explain=(
+                                "Non-whitespace data was found after the PDF %%EOF "
+                                "marker. This is a common technique for concealing "
+                                "payloads in document files."
+                            ),
+                            evidence={"bytes_after_eof": len(after)},
+                            confidence=0.80,
+                            module="embedded_payload.fast",
+                        ))
+
+            # JPEG: data after FF D9 (EOI)
+            eoi = tail.rfind(b"\xff\xd9")
+            if eoi != -1 and eoi < len(tail) - 2:
+                after = tail[eoi + 2:].strip(b"\x00\xff\n\r ")
+                if after:
+                    findings.append(Finding(
+                        threat_id=ThreatID.T7_EMBEDDED_PAYLOAD,
+                        severity=Severity.MEDIUM,
+                        title="JPEG: Data Appended After EOI Marker",
+                        explain=(
+                            "Non-zero data found after the JPEG End-of-Image "
+                            "marker (0xFF 0xD9) — a common steganographic carrier."
+                        ),
+                        evidence={"bytes_after_eoi": len(after)},
+                        confidence=0.75,
+                        module="embedded_payload.fast",
+                    ))
+
+            # PNG: data after IEND chunk (89 50 4E 47 ... 49 45 4E 44 AE 42 60 82)
+            iend = tail.rfind(b"\x49\x45\x4e\x44\xae\x42\x60\x82")
+            if iend != -1 and iend < len(tail) - 8:
+                after = tail[iend + 8:].strip(b"\x00\n\r ")
+                if after:
+                    findings.append(Finding(
+                        threat_id=ThreatID.T7_EMBEDDED_PAYLOAD,
+                        severity=Severity.MEDIUM,
+                        title="PNG: Data Appended After IEND Chunk",
+                        explain=(
+                            "Non-zero data found after the PNG IEND chunk — "
+                            "a common steganographic payload carrier."
+                        ),
+                        evidence={"bytes_after_iend": len(after)},
+                        confidence=0.75,
+                        module="embedded_payload.fast",
+                    ))
 
         except Exception as e:
             logger.warning("Embedded payload fast scan error", error=str(e))

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-05-10
+
+### Added
+
+- **New format support** — RTF (OLE objects, `\bin` streams, `\fldinstr` macros, `\v` hidden text) and HTML (`<script>`, inline event handlers, CSS hidden text) added alongside existing PDF/DOCX/PPTX/XLSX. Macro-enabled Office templates (`.dotm`, `.xltm`, `.potm`, `.xlsm`, `.pptm`) now accepted and flagged T2 by default.
+- **T10/T11/T12 — New threat codes completing T1–T12 coverage** — Indirect/Multi-Hop Injection (T10): URL + fetch-instruction co-occurrence + tool-call schema detection. RAG/Knowledge-Base Poisoning (T11): authority-assertion patterns, sentence-duplication flooding, false citation detection. Social Engineering (T12): tri-signal urgency/authority/action-demand co-occurrence with HIGH overrides for credential harvesting and fake legal threats.
+- **Detection hardening** — Closed 13 concrete bypass vectors: mid-document T4 blind spot (full-doc overlapping windows), zero-width character T4 suppression bypass, FlateDecode-compressed active content evasion, hex-encoded/split PDF token evasion, compressed ToUnicode CMap obfuscation, XObject cycle + XML entity depth DoS (T6), CMYK white text, RTF `\v` hidden text, PDF clipping-path hidden text, homoglyph ATS stuffing, and base64 entropy / multi-level decode hardening.
+- **ML pipeline improvements** — Four-layer T4 pipeline (normalization → Aho-Corasick → fuzzy regex → BERT sliding window). Multilingual phrase set expanded to 145+ (13 languages). BERT recall improved to ≥ 90% (removed early-exit gate; threshold 0.99999 → 0.85). Semantic NN paraphrase-stuffing detection (cosine clustering). 38+ built-in YARA rules covering malware families, CVEs, polyglots, and prompt-injection indicators.
+- **Policy engine** — Named YAML policies with `applies_to` glob matching, per-policy `deny_list`/`allow_list` (SHA-256), `custom_threat_weights`, `required_detectors`, and `profile` overrides. Hot-reload via `engine.reload()`. CLI `--policy-file`/`--policy-name` flags added.
+- **Resilience and security** — Tamper-evident append-only JSONL audit log (SHA-256 hash chain). REST API key auth with per-key rate limiting. Recursive archive scanning (ZIP/tar, depth 3). Password-protected document detection (T1 MEDIUM early return). Docling subprocess isolation with hard-kill timeout (bomb PDF DoS protection). Model integrity SHA-256 manifest. Docker seccomp/cap_drop hardening.
+- **False positive hardening** — 113-document benign corpus (`pytest -m benign`); stop-word filter + minimum absolute-count gates on T5/T9 detectors eliminate FPs on resumes, SEO documents, and academic papers discussing ATS/ranking vocabulary.
+
 ## [0.3.10] - 2026-05-09
 
 ### Security

@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os
-from typing import List
+from typing import List, Optional
 from .base import Detector
 from ..analyzers.base import ParsedDocument
 from ..config import ScanConfig
@@ -14,6 +14,38 @@ try:
     import yara
 except ImportError:
     yara = None
+
+
+def _compile_rules(user_path: Optional[str], include_builtin: bool) -> "yara.Rules | None":
+    """Compile YARA rules from optional user path and/or built-in ruleset.
+
+    Returns a compiled Rules object, or None when yara-python is missing or
+    no rules are configured.
+    """
+    if yara is None:
+        return None
+
+    sources: dict[str, str] = {}
+
+    if include_builtin:
+        from ..rules import DOCUMENT_MALWARE_RULES
+        if os.path.isfile(DOCUMENT_MALWARE_RULES):
+            sources["builtin"] = DOCUMENT_MALWARE_RULES
+
+    if user_path and os.path.isfile(user_path):
+        sources["custom"] = user_path
+
+    if not sources:
+        return None
+
+    try:
+        if len(sources) == 1:
+            return yara.compile(filepath=next(iter(sources.values())))
+        # Compile multiple files together
+        return yara.compile(filepaths=sources)
+    except Exception as exc:
+        logger.warning("YARA rule compilation failed: %s", exc)
+        return None
 
 
 class YaraDetector(Detector):
@@ -50,56 +82,56 @@ class YaraDetector(Detector):
         if not config.enable_yara:
             return findings
 
-        # Custom/User-defined YARA rules
-        if config.yara_rules_path:
+        include_builtin = getattr(config, "enable_builtin_yara_rules", False)
+        compiled = _compile_rules(config.yara_rules_path, include_builtin)
+        if compiled is None:
             if yara is None:
-                # Log warning in production: 'yara-python' not installed
-                return findings
+                logger.debug("yara-python not installed; skipping YARA scan")
+            return findings
 
-            if not os.path.exists(config.yara_rules_path):
-                # Log warning: Rules file not found
-                return findings
-
-            try:
-                rules = yara.compile(filepath=config.yara_rules_path)
-
-                # Scan logical text first (fast)
-                text_matches = rules.match(data=text)
-                for m in text_matches:
-                    findings.append(
-                        Finding(
-                            threat_id=ThreatID.T1_MALWARE,
-                            severity=Severity.CRITICAL,
-                            title=f"YARA Rule Match (Text): {m.rule}",
-                            explain=f"Document text matched YARA rule '{m.rule}'",
-                            evidence={"rule": m.rule, "tags": m.tags, "meta": m.meta},
-                            module=f"{self.name}.text",
-                        )
+        try:
+            # Scan logical text first (fast)
+            text_matches = compiled.match(data=text)
+            for m in text_matches:
+                findings.append(
+                    Finding(
+                        threat_id=ThreatID.T1_MALWARE,
+                        severity=Severity.CRITICAL,
+                        title=f"YARA Rule Match (Text): {m.rule}",
+                        explain=f"Document text matched YARA rule '{m.rule}'",
+                        evidence={"rule": m.rule, "tags": m.tags, "meta": m.meta},
+                        module=f"{self.name}.text",
+                        cve=m.meta.get("cve") or None,
+                        mitre_technique=m.meta.get("mitre") or None,
+                        attack_objective=m.meta.get("description") or None,
                     )
+                )
 
-                # Scan binary file if available (comprehensive)
-                if doc.file_path and os.path.isfile(doc.file_path):
-                    file_matches = rules.match(filepath=doc.file_path)
-                    for m in file_matches:
-                        # Deduplicate if same rule matched both
-                        if not any(f.evidence.get("rule") == m.rule for f in findings):
-                            findings.append(
-                                Finding(
-                                    threat_id=ThreatID.T1_MALWARE,
-                                    severity=Severity.CRITICAL,
-                                    title=f"YARA Rule Match (Binary): {m.rule}",
-                                    explain=f"File binary matched YARA rule '{m.rule}'",
-                                    evidence={
-                                        "rule": m.rule,
-                                        "tags": m.tags,
-                                        "meta": m.meta,
-                                        "malicious_text": str(m.strings[0][2][:250]) if getattr(m, "strings", None) and len(m.strings) > 0 else ""
-                                    },
-                                    module=f"{self.name}.binary",
-                                )
+            # Scan binary file if available (comprehensive)
+            if doc.file_path and os.path.isfile(doc.file_path):
+                file_matches = compiled.match(filepath=doc.file_path)
+                for m in file_matches:
+                    # Deduplicate if same rule matched both
+                    if not any(f.evidence.get("rule") == m.rule for f in findings):
+                        findings.append(
+                            Finding(
+                                threat_id=ThreatID.T1_MALWARE,
+                                severity=Severity.CRITICAL,
+                                title=f"YARA Rule Match (Binary): {m.rule}",
+                                explain=f"File binary matched YARA rule '{m.rule}'",
+                                evidence={
+                                    "rule": m.rule,
+                                    "tags": m.tags,
+                                    "meta": m.meta,
+                                    "malicious_text": str(m.strings[0][2][:250]) if getattr(m, "strings", None) and len(m.strings) > 0 else ""
+                                },
+                                module=f"{self.name}.binary",
+                                cve=m.meta.get("cve") or None,
+                                mitre_technique=m.meta.get("mitre") or None,
+                                attack_objective=m.meta.get("description") or None,
                             )
-            except Exception as e:
-                # In production, we would log this error
-                logger.debug("Error running YARA scan: %s", e)
+                        )
+        except Exception as e:
+            logger.debug("Error running YARA scan: %s", e)
 
         return findings

@@ -9,11 +9,11 @@
 
 🌐 **Documentation & Full Guide:** **[https://www.docfirewall.com](https://www.docfirewall.com)**
 
-**DocFirewall** is a high-performance, configurable security scanner designed to protect Large Language Model (LLM) pipelines, Retrieval-Augmented Generation (RAG) applications, and AI Agents from malicious payloads. 
+**DocFirewall** is a high-performance, configurable security scanner designed to protect Large Language Model (LLM) pipelines, Retrieval-Augmented Generation (RAG) applications, and AI Agents from malicious payloads.
 
 > 🔒 **100% Local & Air-gapped (Zero API):** DocFirewall runs completely locally on your infrastructure. **Zero data is ever sent to external APIs or third-party LLMs.** Secure your AI pipeline without compromising data privacy or compliance.
 
-Whether you are using **LangChain**, **LlamaIndex**, **Haystack**, or custom agentic workflows, DocFirewall acts as a zero-trust compliance layer. It performs strict static analysis and heuristic scanning on **PDF**, **DOCX**, **PPTX**, and **XLSX** files to neutralize threats—such as **Prompt Injection**, **Data Exfiltration**, **XXE**, and **Zip Bombs**—**before** they reach your document parsers, vector databases, or inference engines. It provides out-of-the-box protection against vulnerabilities outlined in the **OWASP LLM Top 10** (e.g., LLM01: Prompt Injection).
+Whether you are using **LangChain**, **LlamaIndex**, **Haystack**, or custom agentic workflows, DocFirewall acts as a zero-trust compliance layer. It performs strict static analysis and heuristic scanning on **PDF**, **DOCX**, **PPTX**, **XLSX**, **RTF**, and **HTML** files to neutralize threats—such as **Prompt Injection**, **LLM Tool-Call Injection**, **Data Exfiltration**, **XXE**, and **Zip Bombs**—**before** they reach your document parsers, vector databases, or inference engines. It provides out-of-the-box protection against vulnerabilities outlined in the **OWASP LLM Top 10** (e.g., LLM01: Prompt Injection).
 
 ---
 
@@ -23,30 +23,38 @@ DocFirewall implements a multi-layered defense strategy covering the following t
 
 | ID | Threat Vector | Description |
 | :--- | :--- | :--- |
-| **T1** | **Malware / Virus** | Integrates with Antivirus (ClamAV, VirusTotal) and Yara to detect known malware signatures. |
-| **T2** | **Active Content** | Detects executable JavaScript, Macros (VBA), OLE objects, and PDF Actions. |
-| **T3** | **Obfuscation** | Identifies homoglyphs, invisible text, and encryption used to bypass filters. |
-| **T4** | **Prompt Injection** | Flags hidden instructions targeting LLM behavior (e.g., "Ignore previous instructions"). |
-| **T5** | **Ranking Manipulation** | Detects keyword stuffing and statistical anomalies to artificially boost ranking. |
-| **T6** | **Resource Exhaustion** | Prevents DoS attacks via Zip bombs, excessive page counts, and recursion. |
-| **T7** | **Embedded Payloads** | Scans for embedded binaries (PE, ELF) and malicious object streams. |
-| **T8** | **Metadata Injection** | Sanitizes metadata fields against buffer overflows and syntax injection. |
-| **T9** | **ATS Manipulation** | Detects SEO poisoning and white-on-white text used to game ranking algorithms. |
+| **T1** | **Malware / Virus** | Integrates with ClamAV, VirusTotal, and a built-in YARA ruleset (30+ document-targeting malware families). |
+| **T2** | **Active Content** | Detects executable JavaScript, VBA Macros, OLE objects, PDF Actions, and LLM tool-call injection schemas (OpenAI, Anthropic, HuggingFace, LangChain, and more). |
+| **T3** | **Obfuscation** | Identifies homoglyphs, invisible text, BIDI overrides, and PDF font-substitution attacks via ToUnicode CMap analysis. |
+| **T4** | **Prompt Injection** | 5-layer detection pipeline (normalization → Aho-Corasick → regex → BERT → semantic NN) with 10-language coverage: English, German, French, Spanish, Italian, Portuguese, Russian, Dutch, Polish, Chinese, Japanese, Korean, Arabic. |
+| **T5** | **Ranking Manipulation** | Detects keyword stuffing and statistical anomalies to artificially boost RAG retrieval ranking. |
+| **T6** | **Resource Exhaustion** | Prevents DoS attacks via Zip bombs, excessive page counts, per-stage timeouts, and file-size hard limits. |
+| **T7** | **Embedded Payloads** | Scans for embedded binaries (PE, ELF), malicious object streams, and steganographic payloads via LSB analysis and PDF whitespace injection detection. |
+| **T8** | **Metadata Injection** | Detects buffer overflows, syntax injection, and high-entropy steganographic carriers in EXIF/XMP metadata fields. |
+| **T9** | **ATS Manipulation** | Detects SEO poisoning, white-on-white text, and off-page positioning used to game applicant tracking systems. |
 
 ---
 
-## 🚀 Performance
+## 🚀 Performance & Coverage
+
 DocFirewall employs a **dual-stage scanning architecture**:
-1.  **Fast Scan**: 10ms-range byte-level analysis for known signatures and structural anomalies.
-2.  **Deep Scan**: Full document parsing (powered by [Docling](https://github.com/DS4SD/docling)) for semantic analysis and complex vector detection.
+1. **Fast Scan** — byte-level analysis of raw binary content, < 20 ms, no parsing required.
+2. **Deep Scan** — full document parsing (powered by [Docling](https://github.com/DS4SD/docling)) with semantic analysis, ML inference, and steganography checks.
 
-**Proven Security Benchmarks:**
-DocFirewall has been rigorously tested against a complex multi-format evaluation dataset containing **over 1,000 document artifacts** spanning benign applications, exact-match zero-day jailbreaks, and heavily obfuscated threats.
+**Supported Formats**: PDF · DOCX · PPTX · XLSX · RTF · HTML
 
-*   **Precision (True Positive Rate): 100%** (Zero False Positives on benign documents)
-*   **Aho-Corasick Fast-Match Speed:** $O(n)$ complexity (milliseconds per document)
-*   **Deep NLP Zero-Day Catch Rate:** Extremely high recall using locally-hosted BERT classification
-*(Validated on v3 Holdout Dataset containing 70+ adversarial samples and 100+ clean benign baseline files. Detailed metrics are fully reproducible via our `test_advanced_ml_metrics.py` toolkit).*
+**Security Benchmarks:**
+
+| Metric | Value |
+| :--- | :--- |
+| Precision on benign documents | **100%** (non-negotiable — zero false positives) |
+| Recall (OWASP LLM01 injection suite) | **≥ 93%** with ML enabled |
+| Aho-Corasick phase matching | O(n), < 1 ms |
+| Deep NLP (BERT, balanced profile) | ~51 ms avg, CPU |
+| Languages covered (injection detection) | 13 (EN, DE, FR, ES, IT, PT, RU, NL, PL, ZH, JA, KO, AR) |
+| Built-in YARA rules | 30+ document-targeting malware families |
+
+*(Validated on v3 Holdout Dataset: 70+ adversarial samples and 100+ clean benign baseline files. Metrics are reproducible via `test_advanced_ml_metrics.py`.)*
 
 ---
 
@@ -151,20 +159,42 @@ report = scan("contract.docx", config=config)
 ```
 
 ### Command Line Interface (CLI)
-Quickly scan single files or recursively evaluate entire directories right from your terminal without writing code.
+
+The CLI is organized into three subcommands. The bare `doc-firewall <path>` form is also supported for backward compatibility.
 
 ```bash
-# Scan a single file and print a human-readable assessment
+# ── scan ────────────────────────────────────────────────────────────────────
+# Scan a single file (human-readable output)
+doc-firewall scan uploads/suspicious_file.pdf
+
+# Backward-compatible shorthand (injects `scan` automatically)
 doc-firewall uploads/suspicious_file.pdf
 
-# Scan a directory recursively with strict limits and enable Deep Learning inference
-doc-firewall ./resumes/ --profile strict --enable-ml
+# Scan a directory recursively with strict profile and ML detectors
+doc-firewall scan ./resumes/ --profile strict --enable-ml
 
-# Export standard JSON for your web application
-doc-firewall uploads/contract.docx --json > report.json
+# Export JSON for your web application
+doc-firewall scan uploads/contract.docx --json > report.json
 
-# Enterprise Integration: Export directly to SIEM (DataDog/Splunk ingest format)
-doc-firewall /data/ingest/ --siem-format --output /logging/soc_events.jsonl
+# SIEM-format output (one JSON event per line — DataDog / Splunk ingest)
+doc-firewall scan /data/ingest/ --siem-format --output /logging/soc_events.jsonl
+
+# Write scan results to a tamper-evident audit log
+doc-firewall scan invoice.pdf --audit-log /var/log/docfw/audit.jsonl
+
+# ── audit ───────────────────────────────────────────────────────────────────
+# Verify an audit log's SHA-256 hash chain (exits 0 if valid, 1 if tampered)
+doc-firewall audit verify-chain /var/log/docfw/audit.jsonl
+
+# Generate a new API key + hash pair for the REST API key store
+doc-firewall audit keygen --name "intake-service"
+
+# ── rules ───────────────────────────────────────────────────────────────────
+# Validate a custom YARA rules file for syntax errors
+doc-firewall rules test my_rules.yar
+
+# Validate and test against a directory of sample documents
+doc-firewall rules test my_rules.yar --test-dir ./test_samples/
 ```
 
 ### Docker / Microservice Support
@@ -182,25 +212,46 @@ curl -X POST -F "file=@suspicious.pdf" "http://localhost:8000/scan?profile=stric
 
 ---
 
-##  Configuration
+## ⚙️ Configuration
 
-You can tune DocFirewall via `ScanConfig`. By default, DocFirewall uses lightning-fast regex and byte heuristics. You can also enable **Advanced Machine Learning Detectors** (v0.3.0+) which utilize completely local, offline models (Aho-Corasick, BERT, TF-IDF, and Shannon Entropy).
+DocFirewall is configured via `ScanConfig`. All settings have safe defaults; ML detectors are opt-in to preserve sub-millisecond latency for deployments that only need heuristic scanning.
 
 ```python
 from doc_firewall import scan, ScanConfig
 
 config = ScanConfig(
-    profile="balanced",
-    
-    # Advanced NLP / ML Detectors (Disabled by default for maximum speed)
-    enable_advanced_ahocorasick=True,     # Ultra-fast O(n) known injection phrase matching
-    enable_advanced_bert=True,            # Local zero-day Prompt Injection classification
-    enable_advanced_tfidf=True,           # Context drift and keyword stuffing via Jaccard/TF-IDF
-    enable_credential_entropy=True,       # Detects hardcoded APIs/Keys via Shannon Entropy
-    
-    # Optional: Point to a pre-downloaded offline HuggingFace model folder
-    # bert_model_path="/mnt/secure_volume/models/deberta-v3"
+    profile="balanced",           # lenient | balanced | strict
+
+    # ── Format support ──────────────────────────────────────────────────────
+    enable_pdf=True, enable_docx=True, enable_pptx=True,
+    enable_xlsx=True, enable_rtf=True, enable_html=True,
+
+    # ── Advanced NLP / ML Detectors (opt-in for maximum speed by default) ───
+    enable_advanced_ahocorasick=True,   # O(n) phrase matching — 13 languages + tool schemas
+    enable_advanced_bert=True,          # Local DeBERTa zero-day injection classifier
+    enable_advanced_tfidf=True,         # TF-IDF keyword-stuffing drift detector
+    enable_credential_entropy=True,     # Shannon entropy secret/API-key detector
+    enable_semantic_nn=True,            # Cosine NN over 80 multilingual attack anchors
+
+    # Optional: local model weights (for air-gapped deployments)
+    # bert_model_path="/mnt/models/deberta-v3-base-prompt-injection-v2",
+    nn_sim_threshold=0.72,              # Recall-tuned (default, down from 0.80)
+
+    # ── Security features (opt-in) ──────────────────────────────────────────
+    enable_yara=True,
+    enable_builtin_yara_rules=True,     # Include 30+ built-in malware family rules
+    # yara_rules_path="/etc/docfw/custom.yar",  # Layer in your own rules
+
+    enable_steganography_checks=True,   # LSB, metadata entropy, PDF whitespace injection
+
+    # ── Immutable audit log (SHA-256 hash chain) ────────────────────────────
+    audit_log_path="/var/log/docfw/audit.jsonl",
+
+    # ── REST API auth (when deploying api.py) ───────────────────────────────
+    api_keys_path="/etc/docfw/api_keys.json",
+    api_rate_limit_rpm=60,
 )
+
 report = scan("resume.pdf", config=config)
 ```
 

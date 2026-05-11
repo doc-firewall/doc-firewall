@@ -2,11 +2,45 @@ version: '3.8'
 
 services:
   doc-firewall-api:
-    build: 
+    build:
       context: .
-      # Assuming you will modify your Dockerfile to `pip install doc-firewall[api,ml]`
     image: doc-firewall-api:latest
     container_name: doc-firewall-api
     ports:
       - "8000:8000"
     command: uvicorn doc_firewall.api:app --host 0.0.0.0 --port 8000
+
+    # 3.6 — Read-only filesystem: only explicitly declared volumes are writable.
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777      # parsing scratch space
+      - /run:size=32m,mode=0755       # runtime sockets / pid files
+      - /var/log/docfw:size=64m       # audit log (override with a named volume in prod)
+
+    # 3.6 — Seccomp profile: blocks ptrace, clone CLONE_NEWUSER, mount, etc.
+    security_opt:
+      - seccomp:docker/seccomp.json
+      - no-new-privileges:true
+
+    # Drop all Linux capabilities; re-add only what uvicorn needs (none beyond defaults).
+    cap_drop:
+      - ALL
+
+    # Resource limits — defence against resource-exhaustion attacks.
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          memory: 512M
+
+    environment:
+      DOC_FIREWALL_API_MAX_UPLOAD_BYTES: "20971520"   # 20 MB
+      DOC_FIREWALL_API_RATE_LIMIT_RPM: "60"
+
+    # In production, override these volume mounts:
+    #   models/     — pre-downloaded model weights (read-only)
+    #   /etc/docfw/ — api_keys.json, policy.yaml, model_manifest.json (read-only)
+    volumes:
+      - ./models:/app/models:ro

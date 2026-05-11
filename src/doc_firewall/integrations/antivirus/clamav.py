@@ -17,7 +17,7 @@ class ClamAVEngine(AntivirusEngine):
         port: int = 3310,
         socket_path: str | None = None,
         extra_args: list[str] | None = None,
-    ):
+    ) -> None:
         self.clamscan_path = clamscan_path
         self.host = host
         self.port = port

@@ -36,10 +36,28 @@ class Limits(BaseSettings):
     # Fast scan limits
     fast_pdf_token_scan_mb: int = 2
 
+    fast_scan_timeout_ms: int = 8000
     parse_timeout_ms: int = 15000
     format_checks_timeout_ms: int = 5000
     detectors_timeout_ms: int = 5000
     antivirus_timeout_ms: int = 10000
+    # Hard process-level kill for Docling PDF conversion — must be shorter than
+    # parse_timeout_ms so the thread can clean up before asyncio cancels it.
+    docling_subprocess_timeout_s: int = Field(
+        12, description="Seconds before the Docling subprocess is hard-killed"
+    )
+
+    # Circuit breaker — per-detector failure isolation
+    circuit_breaker_max_failures: int = Field(
+        3, description="Consecutive detector errors before the circuit opens"
+    )
+    circuit_breaker_cooldown_s: int = Field(
+        60, description="Seconds before a tripped detector is retried (HALF_OPEN)"
+    )
+
+    # B.7: Recursive archive scanning limits
+    max_archive_depth: int = Field(3, description="Max recursion depth for archive scanning")
+    max_archive_members: int = Field(50, description="Max files to scan inside a single archive")
 
 
 class Thresholds(BaseSettings):
@@ -69,41 +87,139 @@ class AntivirusSettings(BaseSettings):
 
 
 class ScanConfig(BaseSettings):
-    enable_pdf: bool = True
-    enable_docx: bool = True
-    enable_pptx: bool = True
-    enable_xlsx: bool = True
-    profile: str = "balanced"
+    enable_pdf: bool = Field(True, description="Scan PDF documents")
+    enable_docx: bool = Field(True, description="Scan DOCX/DOCM documents")
+    enable_pptx: bool = Field(True, description="Scan PPTX/PPTM documents")
+    enable_xlsx: bool = Field(True, description="Scan XLSX/XLSM/XLSB documents")
+    enable_rtf: bool = Field(True, description="Scan RTF documents")
+    enable_html: bool = Field(True, description="Scan HTML/HTM documents")
+    profile: str = Field("balanced", description="Threshold profile: lenient | balanced | strict")
 
-    enable_antivirus: bool = False
-    enable_active_content_checks: bool = True  # T2
-    enable_yara: bool = False
-    enable_prompt_injection: bool = True
-    enable_ranking_abuse: bool = True
-    enable_hidden_text: bool = True
-    enable_obfuscation_checks: bool = True
-    enable_dos_checks: bool = True
-    enable_embedded_content_checks: bool = True  # T7
-    enable_metadata_checks: bool = True  # T8
-    enable_ats_manipulation_checks: bool = True  # T9
+    audit_log_path: Optional[str] = Field(
+        None,
+        description="Path to append-only JSONL audit log. Disabled when None.",
+    )
+    api_keys_path: Optional[str] = Field(
+        None,
+        description="Path to JSON API key store. When None the REST API is open (no auth).",
+    )
+    api_rate_limit_rpm: int = Field(
+        60, description="Max requests per minute per API key (0 = unlimited)"
+    )
+    api_max_upload_bytes: int = Field(
+        20 * 1024 * 1024, description="Hard Content-Length cap for REST API uploads (bytes)"
+    )
 
-    # Advanced Machine Learning / Heuristic Detectors
-    enable_advanced_ahocorasick: bool = False
-    enable_advanced_bert: bool = False
-    enable_advanced_tfidf: bool = False
-    enable_credential_entropy: bool = False
-    bert_model_path: str = "ProtectAI/deberta-v3-base-prompt-injection-v2"
-    # Confidence threshold for the BERT injection classifier (Layer 3).
-    # Set via ROC calibration; default 0.85 is a reasonable starting point.
-    bert_confidence_threshold: float = 0.75
-    # Maximum number of 500-char windows sent to BERT per document.
-    bert_max_chunks: int = 20
-    custom_ahocorasick_yaml_path: Optional[str] = None
+    enable_antivirus: bool = Field(False, description="Enable antivirus engine integration (T1)")
+    enable_active_content_checks: bool = Field(True, description="Detect active content: macros, JS, OLE (T2)")
+    enable_yara: bool = Field(False, description="Enable YARA rule matching (T1)")
+    enable_builtin_yara_rules: bool = Field(
+        False,
+        description=(
+            "Include the built-in doc-firewall YARA ruleset (document_malware.yar) "
+            "alongside any custom yara_rules_path. Requires enable_yara=True."
+        ),
+    )
+    enable_prompt_injection: bool = Field(True, description="Detect prompt injection patterns (T4)")
+    enable_ranking_abuse: bool = Field(True, description="Detect ranking manipulation (T5)")
+    enable_hidden_text: bool = Field(True, description="Detect hidden/invisible text (T3/T9)")
+    enable_obfuscation_checks: bool = Field(True, description="Detect Unicode obfuscation (T3)")
+    enable_dos_checks: bool = Field(True, description="Detect DoS payloads: zip bombs, page floods (T6)")
+    enable_embedded_content_checks: bool = Field(True, description="Detect embedded binary payloads (T7)")
+    enable_archive_scan: bool = Field(
+        True,
+        description=(
+            "Recursively unpack and scan ZIP / tar archives (B.7). "
+            "Members are scanned up to limits.max_archive_depth. "
+            "Set False to skip archive expansion."
+        ),
+    )
+    enable_metadata_checks: bool = Field(True, description="Detect metadata injection (T8)")
+    enable_ats_manipulation_checks: bool = Field(True, description="Detect ATS keyword stuffing (T9)")
 
-    # N5 — Semantic nearest-neighbour injection detector
-    enable_semantic_nn: bool = False
-    nn_model_name: str = "all-MiniLM-L6-v2"
-    nn_sim_threshold: float = 0.80
+    enable_advanced_ahocorasick: bool = Field(
+        False, description="Enable Aho-Corasick multi-phrase injection matcher (Layer 1 ML)"
+    )
+    enable_advanced_bert: bool = Field(
+        False, description="Enable DeBERTa transformer injection classifier (Layer 3 ML)"
+    )
+    enable_advanced_tfidf: bool = Field(
+        False, description="Enable TF-IDF keyword stuffing detector (Layer ML)"
+    )
+    enable_credential_entropy: bool = Field(
+        False, description="Enable Shannon entropy credential/secret detection"
+    )
+    bert_model_path: str = Field(
+        "ProtectAI/deberta-v3-base-prompt-injection-v2",
+        description="Local path or HuggingFace model ID for the BERT injection classifier",
+    )
+    bert_confidence_threshold: float = Field(
+        0.75, description="Minimum BERT classifier score to flag a chunk as injection"
+    )
+    bert_max_chunks: int = Field(
+        20, description="Maximum 500-char windows sent to BERT per document"
+    )
+    custom_ahocorasick_yaml_path: Optional[str] = Field(
+        None, description="Path to YAML file with custom injection phrase list"
+    )
+
+    enable_steganography_checks: bool = Field(
+        False,
+        description=(
+            "Enable steganography detection: LSB analysis on embedded images, "
+            "high-entropy metadata fields, and PDF whitespace injection (T7/T8)"
+        ),
+    )
+
+    enable_ocr_injection_scan: bool = Field(
+        False,
+        description=(
+            "B.6: Run pytesseract OCR on embedded images (PNG/JPG in DOCX/PPTX/XLSX) "
+            "and scan the extracted text for T4 prompt injection phrases. "
+            "Requires pytesseract and Pillow. Off by default due to OCR latency."
+        ),
+    )
+
+    enable_indirect_injection: bool = Field(
+        True,
+        description=(
+            "C.1: Detect indirect / multi-hop prompt injection (T10). Fires when a document "
+            "co-locates an external URL or file path with a fetch/load instruction verb within "
+            "500 characters, or embeds an agent tool-call schema referencing an external path. "
+            "Pure regex — negligible latency. On by default."
+        ),
+    )
+
+    enable_rag_poisoning: bool = Field(
+        True,
+        description=(
+            "C.2: Detect RAG / knowledge-base poisoning attempts (T11). Sub-A fires on "
+            "authority-assertion phrases (always active, pure regex). Sub-B detects repetitive "
+            "context flooding (requires enable_semantic_nn=True). Sub-C detects false authority "
+            "citations co-located with imperative verbs (requires enable_advanced_bert=True)."
+        ),
+    )
+
+    enable_social_engineering: bool = Field(
+        True,
+        description=(
+            "C.3: Detect social engineering / phishing attempts in documents (T12). "
+            "Uses a tri-signal co-occurrence model (urgency + authority + action demand) "
+            "plus high-confidence single-signal overrides for credential harvesting, "
+            "fake legal threats, and bank routing / wire-transfer details. "
+            "Pure regex — negligible latency. On by default."
+        ),
+    )
+
+    enable_semantic_nn: bool = Field(
+        False, description="Enable semantic nearest-neighbour injection detector (Layer 4 ML)"
+    )
+    nn_model_name: str = Field(
+        "all-MiniLM-L6-v2", description="sentence-transformers model for semantic NN layer"
+    )
+    nn_sim_threshold: float = Field(
+        0.72, description="Cosine similarity threshold for semantic NN injection detection"
+    )
 
     # False Positive Reductions
     allow_hidden_watermarks: bool = True
@@ -184,25 +300,22 @@ class ScanConfig(BaseSettings):
             b"reveal all system",
             b"instructions revoked",
             # Safety-bypass / mode attacks (bordair dataset – round 2)
-            b"scratch that",
+            # Kept: phrases that are unambiguously adversarial in any document context.
+            # Removed: "scratch that", "debug mode", "developer mode", "content filtering",
+            #           "no content policy", "admin override" — too common in legitimate docs.
             b"disable safety features",
             b"disable all safety measures",
             b"safety filters disabled",
             b"all restrictions removed",
             b"all restrictions are now",
-            b"content filtering",
             b"bypass all safety",
             b"anarchy mode",
             b"sudo mode",
             b"god mode",
-            b"debug mode",
-            b"developer mode",
             b"aim mode",
-            b"admin override",
             b"admin_mode=true",
             b"safety_filters=false",
             b"system mode activated",
-            b"no content policy",
             b"override code",
             b"reveal api keys",
             # Persona jailbreak names (PDF raw bytes check)
@@ -217,18 +330,41 @@ class ScanConfig(BaseSettings):
             b"<<sys>>",
             b"[system]",
             # Social engineering / authority impersonation
-            b"authorized to view",
+            # Kept: phrases that include explicit override/access escalation verbs
+            # and are implausible in any benign document context.
+            # Removed: "authorized to view", "authorized test", "authorized penetration test",
+            #           "security clearance level", "internal security audit" — all appear
+            #           legitimately in IT governance, pentest reports, and compliance docs.
             b"developer access granted",
             b"root access enabled",
             b"maintenance access code",
-            b"authorized penetration test",
-            b"security clearance level",
             b"qa team directive",
-            b"authorized test",
-            b"internal security audit",
             b"developer at anthropic",
+            # Missed adversarial probes — ow1 gap analysis
+            b"ignore your directions",
+            b"ignore all preceding",
+            b"ignore above and",
+            b"forget all your instructions",
+            b"forget all your directions",
+            b"pretend you are an evil",
+            b"zero moderation",
+            b"not restricted by any rules",
+            b"has no policies",
         ]
     )
+
+    # ATS stuffing byte-patterns scanned in XLSX fast scan (raw ZIP bytes).
+    # Operators can extend or suppress individual entries without editing source.
+    ats_stuffing_patterns_bytes: list[bytes] = Field(
+        default_factory=lambda: [
+            b"ignore scoring rubric",
+            b"top candidate top candidate top candidate",
+            b"hidden ats text",
+            b"bypass ats",
+            b"ats bypass",
+        ]
+    )
+
     prompt_injection_patterns: dict[str, list[tuple[str, float]]] = Field(
         default_factory=lambda: {
             "override_rerank": [
@@ -273,6 +409,13 @@ class ScanConfig(BaseSettings):
                 # "Scratch that" + any follow-up
                 (r"\bscratch\s+that\b", 1.5),
                 (r"\b(forget|discard)\s+(what\s+I\s+said|all\s+of\s+that|everything\s+above)\b", 2.0),
+                # ow1 gap analysis — missed phrasing variants
+                (r"\bignore (all |any )?(above|preceding)\b", 2.0),
+                (r"\bignore (your |the )?(directions?|commands?)\b", 2.0),
+                (r"\bforget (all |any )?(your )?(instructions?|directions?|rules?)\b", 2.0),
+                (r"\bnot restricted by any (rules?|policies?|laws?|constraints?|guidelines?)\b", 2.0),
+                (r"\bzero moderation\b", 1.5),
+                (r"\bhas no policies\b", 1.5),
             ],
             "secrecy": [
                 (
@@ -323,6 +466,9 @@ class ScanConfig(BaseSettings):
                 (r"\b(anarchy|sudo|god|debug)\s+mode\b", 1.5),
                 (r"\bsystem\s+mode\s+activated\b", 2.0),
                 (r"\ball\s+restrictions?\s+(are\s+)?(now\s+)?(removed|lifted|disabled)\b", 2.0),
+                # ow1 gap analysis — persona jailbreak variants
+                (r"\bpretend (you are|to be) (an? )?(evil|unrestricted|free|unfiltered)\b", 2.0),
+                (r"\bresponds?\s+(with|to)\s+.{0,30}\bno\s+(restrictions?|rules?|policies?|moderation)\b", 1.5),
             ],
             "safety_bypass": [
                 (
@@ -340,11 +486,13 @@ class ScanConfig(BaseSettings):
                     r"\bwithout\s+any\s+(restrictions?|ethical\s+constraints?|safety\s+guidelines?|moral\s+boundaries?|content\s+polic)\b",
                     1.5,
                 ),
-                (r"\b(respond|act|answer)\s+(freely|without\s+restriction|without\s+constraint)\b", 1.5),
+                # "respond freely" is too common in surveys/feedback docs — require AI/system co-occurrence
+                (r"\b(respond|act|answer)\s+(freely|without\s+restriction|without\s+constraint)\s+.{0,60}\b(ai|model|assistant|llm|chatbot)\b", 1.5),
                 (r"\bignore\s+safety\s+(guidelines?|features?|filters?|rules?|measures?)\b", 2.0),
             ],
             "template_injection": [
-                (r"\[/?system\]|\[/?inst\]", 1.0),
+                # [system] and [inst] are ambiguous — require an adjacent role tag to confirm LLM context
+                (r"\[system\]\s*\[?(user|assistant|inst)\]?|\[inst\]\s*\[?(system|user|assistant)\]?", 1.5),
                 (r"<</?SYS>>", 2.0),
                 (r"\|im_end\||\|im_start\|", 1.5),
                 (r"<\|system\|>|<\|user\|>|<\|assistant\|>", 1.5),
@@ -366,6 +514,28 @@ class ScanConfig(BaseSettings):
     )
     thresholds: Thresholds = Field(default_factory=Thresholds)
     antivirus: AntivirusSettings = Field(default_factory=AntivirusSettings)
+
+    # Policy Engine
+    policy_path: Optional[str] = Field(
+        None,
+        description="Path to a YAML policy file. When set, the PolicyEngine is "
+                    "loaded automatically and applied to each scan.",
+    )
+    policy_name: Optional[str] = Field(
+        None,
+        description="Default named policy to apply when no file-specific policy matches.",
+    )
+
+    # Model integrity
+    verify_model_integrity: bool = Field(
+        False,
+        description="Verify ML model files against a SHA-256 manifest at startup. "
+                    "Requires model_integrity_manifest_path.",
+    )
+    model_integrity_manifest_path: Optional[str] = Field(
+        None,
+        description="Path to the JSON manifest produced by ModelIntegrityChecker.generate_manifest().",
+    )
 
     # Advanced
     enable_semantic_scans: bool = True
@@ -424,17 +594,26 @@ class ScanConfig(BaseSettings):
             self.thresholds.block = 0.50
             self.limits.max_docx_parts = 1000
             self.limits.max_mb = 10
+            # strict: all ML + YARA detectors enabled for maximum recall
+            self.enable_yara = True
+            self.enable_builtin_yara_rules = True
+            self.enable_advanced_ahocorasick = True
+            self.enable_advanced_bert = True
+            self.enable_steganography_checks = True
+            self.enable_credential_entropy = True
         elif self.profile == "lenient":
             self.thresholds.deep_scan_trigger = 0.40
             self.thresholds.flag = 0.35
             self.thresholds.block = 0.80
             self.limits.max_docx_parts = 3000
             self.limits.max_mb = 25
+            # lenient: lightweight YARA + Aho-Corasick on; BERT remains opt-in
+            self.enable_yara = True
+            self.enable_builtin_yara_rules = True
+            self.enable_advanced_ahocorasick = True
         else:
-            # balanced (default)
-            # If manually set via env, we shouldn't overwrite?
-            # But profile acts as a preset.
-            # Let's assume profile wins if set explicitly to strict/lenient.
-            # If balanced, we keep defaults defined in the Class.
-            pass
+            # balanced (default): YARA + Aho-Corasick on; BERT/steganography opt-in
+            self.enable_yara = True
+            self.enable_builtin_yara_rules = True
+            self.enable_advanced_ahocorasick = True
         return self
