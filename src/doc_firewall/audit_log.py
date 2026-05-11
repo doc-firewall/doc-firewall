@@ -37,8 +37,10 @@ _VERSION = "0.4.0"
 
 def _sha256_json(obj: dict) -> str:
     """Stable SHA-256 of a dict: sorted keys, no whitespace."""
+    # SHA-256 is the correct algorithm for a tamper-evident hash chain — this
+    # is data-integrity hashing, not password storage.  # lgtm[py/weak-cryptographic-algorithm]
     serialised = json.dumps(obj, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(serialised.encode()).hexdigest()
+    return hashlib.sha256(serialised.encode()).hexdigest()  # lgtm[py/weak-cryptographic-algorithm]
 
 
 class AuditLog:

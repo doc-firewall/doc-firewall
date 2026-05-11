@@ -20,6 +20,7 @@ For multi-node HA, move bucket state to Redis (Phase 2).
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import time
 import threading
@@ -58,14 +59,21 @@ class KeyStore:
 
     def validate(self, raw_key: str) -> Optional[str]:
         """Return key id if valid, None otherwise."""
-        digest = hashlib.sha256(raw_key.encode()).hexdigest()
+        # API keys are randomly-generated, high-entropy tokens — not passwords.
+        # SHA-256 is the industry-standard storage format for API keys (GitHub,
+        # Stripe, etc.).  hmac.compare_digest gives constant-time comparison to
+        # prevent timing-based enumeration of stored hashes.
+        candidate = hashlib.sha256(raw_key.encode()).hexdigest()  # lgtm[py/weak-cryptographic-algorithm]
         with self._lock:
-            return self._keys.get(digest)
+            for stored_hash, key_id in self._keys.items():
+                if hmac.compare_digest(candidate, stored_hash):
+                    return key_id
+        return None
 
     @staticmethod
     def hash_key(raw_key: str) -> str:
         """Utility: compute the hash to store in the key store JSON."""
-        return hashlib.sha256(raw_key.encode()).hexdigest()
+        return hashlib.sha256(raw_key.encode()).hexdigest()  # lgtm[py/weak-cryptographic-algorithm]
 
 
 # ---------------------------------------------------------------------------
