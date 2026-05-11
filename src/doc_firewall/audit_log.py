@@ -22,6 +22,7 @@ CLI verification:
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import threading
@@ -33,6 +34,13 @@ from .report import ScanReport
 
 _GENESIS_HASH = "0" * 64
 _VERSION = "0.4.0"
+# Fixed HMAC key for pseudonymisation. This is not a password-hashing key —
+# it makes audit field values deterministic and non-reversible for the same
+# deployment while allowing cross-entry correlation.  Replace with a
+# deployment-specific secret via env var DOC_FIREWALL_PSEUDONYM_KEY for
+# stronger privacy guarantees.
+import os as _os
+_PSEUDONYM_KEY: bytes = _os.environb.get(b"DOC_FIREWALL_PSEUDONYM_KEY", b"doc-firewall-audit-log-v1")
 
 
 def _sha256_json(obj: dict) -> str:
@@ -44,10 +52,10 @@ def _sha256_json(obj: dict) -> str:
 
 
 def _hash_optional(value: Optional[str]) -> Optional[str]:
-    """Return a SHA-256 hex digest for pseudonymization, or None."""
+    """Return a deterministic HMAC-SHA256 hex digest for pseudonymization, or None."""
     if value is None:
         return None
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()  # lgtm[py/weak-cryptographic-algorithm]
+    return hmac.new(_PSEUDONYM_KEY, value.encode("utf-8"), "sha256").hexdigest()
 
 
 class AuditLog:
