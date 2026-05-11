@@ -1,22 +1,29 @@
 from __future__ import annotations
 import os
 import asyncio
-import time
+import tarfile
+import tempfile
+import zipfile as _zipfile
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor
 
 from .config import ScanConfig
-from .enums import ThreatID, Severity
+from .enums import ThreatID, Severity, Verdict
+from .policy import Policy, PolicyEngine
 from .report import ScanReport, Finding
 from .risk_model import RiskModel
 from .analyzers.pdf.fast_scan import fast_scan_pdf
 from .analyzers.docx.fast_scan import fast_scan_docx
 from .analyzers.pptx.fast_scan import fast_scan_pptx
 from .analyzers.xlsx.fast_scan import fast_scan_xlsx
+from .analyzers.rtf.fast_scan import fast_scan_rtf
+from .analyzers.html.fast_scan import fast_scan_html
 from .analyzers.pdf.parser import parse_pdf, ParsedDocument
 from .analyzers.docx.parser import parse_docx
 from .analyzers.pptx.parser import parse_pptx
 from .analyzers.xlsx.parser import parse_xlsx
+from .analyzers.rtf.parser import parse_rtf
+from .analyzers.html.parser import parse_html
 
 # format checks
 from .analyzers.pdf.active_content import detect_pdf_active_content
@@ -42,9 +49,16 @@ from .detectors.advanced_prompt_injection import AdvancedPromptInjectionDetector
 from .detectors.advanced_ats_manipulation import AdvancedATSNLPDetector
 from .detectors.credential_leakage import CredentialLeakageDetector
 from .detectors.injection_nn import InjectionNNDetector
+from .detectors.steganography import SteganographyDetector
+from .detectors.ocr_injection import OCRInjectionDetector
+from .detectors.indirect_injection import IndirectInjectionDetector
+from .detectors.rag_poisoning import RAGPoisoningDetector
+from .detectors.social_engineering import SocialEngineeringDetector
 
+from .utils.circuit_breaker import CircuitBreaker, CircuitOpenError
 from .utils.hashing import sha256_file
-from .utils.mime import guess_file_type
+from .utils.mime import guess_file_type, is_macro_template
+from .utils.timeouts import Timer
 from .logger import get_logger
 
 logger = get_logger()
@@ -53,6 +67,7 @@ logger = get_logger()
 _MAGIC_BYTES = {
     b"%PDF": "pdf",
     b"PK\x03\x04": "zip",  # Generic ZIP — probe inner structure to refine
+    b"{\\rtf": "rtf",      # RTF documents start with {\rtf
 }
 
 _ZIP_INNER_SIGNATURES: list[tuple[str, str]] = [
@@ -89,23 +104,33 @@ def _detect_file_type_by_magic(path: str) -> str:
     return "unknown"
 
 
-class Timer:
-    def __enter__(self):
-        self.start = time.perf_counter()
-        return self
-
-    def __exit__(self, *args):
-        self.end = time.perf_counter()
-        self.duration_ms = (self.end - self.start) * 1000.0
-
-
 class Scanner:
-    def __init__(self, config: Optional[ScanConfig] = None):
+    def __init__(
+        self,
+        config: Optional[ScanConfig] = None,
+        policy_engine: Optional[PolicyEngine] = None,
+    ) -> None:
         self.config = config or ScanConfig()
         self.risk_model = RiskModel(self.config)
         self._executor = ThreadPoolExecutor(
             max_workers=getattr(self.config, "max_workers", 4)
         )
+
+        # Policy engine — built from config.policy_path if not supplied explicitly
+        if policy_engine is not None:
+            self._policy_engine: Optional[PolicyEngine] = policy_engine
+        elif self.config.policy_path:
+            self._policy_engine = PolicyEngine(self.config.policy_path)
+        else:
+            self._policy_engine = None
+
+        # Model integrity — verify model files before any detector loads them
+        if self.config.verify_model_integrity and self.config.model_integrity_manifest_path:
+            from .security.model_integrity import ModelIntegrityChecker
+            checker = ModelIntegrityChecker(self.config.model_integrity_manifest_path)
+            for model_path in self._model_paths():
+                checker.verify(model_path)
+
         # Initialize detectors
         self.detectors = [
             EmbeddedPayloadDetector(),
@@ -121,9 +146,135 @@ class Scanner:
             AdvancedATSNLPDetector(),
             CredentialLeakageDetector(),
             InjectionNNDetector(),
+            SteganographyDetector(),
+            OCRInjectionDetector(),
+            IndirectInjectionDetector(),
+            RAGPoisoningDetector(),
+            SocialEngineeringDetector(),
         ]
 
-    async def scan_async(self, file_path: str) -> ScanReport:
+        # One circuit breaker per detector — persists across scan() calls so
+        # failures accumulate and a consistently-broken detector eventually
+        # trips open for the cooldown period.
+        self._breakers: dict[str, CircuitBreaker] = {
+            det.name: CircuitBreaker(
+                name=det.name,
+                max_failures=self.config.limits.circuit_breaker_max_failures,
+                cooldown_s=float(self.config.limits.circuit_breaker_cooldown_s),
+            )
+            for det in self.detectors
+        }
+
+    def _model_paths(self) -> list[str]:
+        """Collect configured ML model paths for integrity pre-check."""
+        paths = []
+        if self.config.bert_model_path:
+            paths.append(self.config.bert_model_path)
+        if self.config.nn_model_name and os.path.isdir(self.config.nn_model_name):
+            paths.append(self.config.nn_model_name)
+        return [p for p in paths if os.path.exists(p)]
+
+    def _scan_archive(
+        self,
+        archive_path: str,
+        parent_report: ScanReport,
+        depth: int = 0,
+    ) -> None:
+        """Unpack a ZIP or tar archive and recursively scan each member (B.7).
+
+        Findings from sub-scans are merged into *parent_report* with
+        ``evidence["archive_member"]`` indicating the originating path.
+        Stops at ``limits.max_archive_depth`` recursion levels and
+        ``limits.max_archive_members`` per archive.
+        """
+        if depth >= self.config.limits.max_archive_depth:
+            parent_report.add(Finding(
+                threat_id=ThreatID.T6_DOS,
+                severity=Severity.MEDIUM,
+                title="Archive Recursion Depth Limit Reached",
+                explain=(
+                    f"Archive nesting exceeded {self.config.limits.max_archive_depth} "
+                    "levels. Remaining contents were not scanned."
+                ),
+                evidence={"archive_path": archive_path, "depth": depth},
+                module="scanner.archive",
+            ))
+            return
+
+        max_mb = self.config.limits.max_mb * 1024 * 1024
+        max_members = self.config.limits.max_archive_members
+
+        with tempfile.TemporaryDirectory(prefix="docfw_arc_") as tmpdir:
+            members_extracted = 0
+            try:
+                if tarfile.is_tarfile(archive_path):
+                    with tarfile.open(archive_path, "r:*") as tf:
+                        for member in tf.getmembers():
+                            if members_extracted >= max_members:
+                                break
+                            if member.size > max_mb:
+                                parent_report.add(Finding(
+                                    threat_id=ThreatID.T6_DOS,
+                                    severity=Severity.MEDIUM,
+                                    title="Archive Member Exceeds Size Limit",
+                                    explain=f"Member '{member.name}' exceeds scan limit.",
+                                    evidence={"member": member.name, "size": member.size},
+                                    module="scanner.archive",
+                                ))
+                                continue
+                            if not member.isfile():
+                                continue
+                            tf.extract(member, path=tmpdir, filter="data")
+                            members_extracted += 1
+                elif _zipfile.is_zipfile(archive_path):
+                    with _zipfile.ZipFile(archive_path, "r") as zf:
+                        for info in zf.infolist():
+                            if members_extracted >= max_members:
+                                break
+                            if info.file_size > max_mb:
+                                parent_report.add(Finding(
+                                    threat_id=ThreatID.T6_DOS,
+                                    severity=Severity.MEDIUM,
+                                    title="Archive Member Exceeds Size Limit",
+                                    explain=f"Member '{info.filename}' exceeds scan limit.",
+                                    evidence={"member": info.filename, "size": info.file_size},
+                                    module="scanner.archive",
+                                ))
+                                continue
+                            if info.filename.endswith("/"):
+                                continue
+                            zf.extract(info, path=tmpdir)
+                            members_extracted += 1
+                else:
+                    return  # Not a recognized archive format
+            except Exception as exc:
+                logger.debug("Archive extraction error: %s", exc)
+                return
+
+            # Scan each extracted file
+            for root, _dirs, files in os.walk(tmpdir):
+                for fname in files:
+                    member_path = os.path.join(root, fname)
+                    relative = os.path.relpath(member_path, tmpdir)
+                    try:
+                        sub_report = self.scan(member_path)
+                        for finding in sub_report.findings:
+                            # Tag with originating archive member path
+                            finding.evidence = dict(finding.evidence or {})
+                            finding.evidence["archive_member"] = relative
+                            parent_report.add(finding)
+                        # Recurse into nested archives
+                        member_ftype = _detect_file_type_by_magic(member_path)
+                        if member_ftype == "zip" and self.config.enable_archive_scan:
+                            self._scan_archive(member_path, parent_report, depth + 1)
+                    except Exception as exc:
+                        logger.debug("Sub-scan error for %s: %s", relative, exc)
+
+    async def scan_async(
+        self,
+        file_path: str,
+        policy_name: Optional[str] = None,
+    ) -> ScanReport:
         file_path = os.path.abspath(file_path)
 
         # Security: Validate path resolves to a regular file
@@ -162,12 +313,53 @@ class Scanner:
             logger.error("Pre-flight check failed", file=file_path, error=str(e))
             raise
 
-        log_ctx = logger.bind(file_path=file_path, sha256=sha, file_type=ftype)
+        # ── Policy resolution ────────────────────────────────────────────────
+        effective_policy: Optional[Policy] = None
+        if self._policy_engine is not None:
+            effective_policy = self._policy_engine.get_for_file(
+                file_path,
+                policy_name=policy_name or self.config.policy_name,
+            )
+
+        log_ctx = logger.bind(
+            file_path=file_path,
+            sha256=sha,
+            file_type=ftype,
+            policy=effective_policy.name if effective_policy else None,
+        )
         log_ctx.info("Starting scan")
 
         report = ScanReport(
             file_path=file_path, file_type=ftype, sha256=sha, size_bytes=size_bytes
         )
+
+        if effective_policy is not None:
+            report.metadata["policy"] = effective_policy.name
+
+        # Deny list — instant BLOCK without scanning
+        if effective_policy and sha.lower() in effective_policy.deny_hashes:
+            log_ctx.warning("File matched policy deny list")
+            report.add(
+                Finding(
+                    threat_id=ThreatID.T1_MALWARE,
+                    severity=Severity.CRITICAL,
+                    title="Denied by policy",
+                    explain=f"SHA-256 {sha[:16]}… is on the deny list for policy '{effective_policy.name}'.",
+                    module="policy.deny_list",
+                    confidence=1.0,
+                )
+            )
+            report.risk_score = 1.0
+            report.verdict = Verdict.BLOCK
+            return report
+
+        # Allow list — skip all scanning, instant ALLOW
+        if effective_policy and sha.lower() in effective_policy.allow_hashes:
+            log_ctx.info("File matched policy allow list — scan skipped")
+            report.metadata["allow_list_match"] = True
+            report.risk_score = 0.0
+            report.verdict = Verdict.ALLOW
+            return report
 
         # --- STAGE 1: FAST SCAN ---
         size_mb = size_bytes / (1024 * 1024)
@@ -215,16 +407,67 @@ class Scanner:
                     findings.extend(fast_scan_pptx(file_path, self.config))
                 elif ftype == "xlsx" and self.config.enable_xlsx:
                     findings.extend(fast_scan_xlsx(file_path, self.config))
+                elif ftype == "rtf" and self.config.enable_rtf:
+                    findings.extend(fast_scan_rtf(file_path, self.config))
+                elif ftype == "html" and self.config.enable_html:
+                    findings.extend(fast_scan_html(file_path, self.config))
+                elif ftype == "zip" and self.config.enable_archive_scan:
+                    # B.7: Generic ZIP — not an Office format. Unpack and
+                    # recursively scan each member. Findings are merged back
+                    # into this report after the fast scan returns.
+                    findings.append(Finding(
+                        threat_id=ThreatID.T7_EMBEDDED_PAYLOAD,
+                        severity=Severity.LOW,
+                        title="Archive Container Detected",
+                        explain=(
+                            "File is a plain ZIP archive (not an Office format). "
+                            "Contents will be recursively scanned."
+                        ),
+                        evidence={"file_type": "zip"},
+                        confidence=0.50,
+                        module="scanner.archive",
+                    ))
 
                 # 3. New DoS Fast Checks
                 if "pdf" in ftype and self.config.enable_pdf:
                     findings.extend(PdfDoSDetector.fast_scan(file_path, self.config))
 
+                # 4. Macro-enabled template extension — elevated scrutiny (item 0.12)
+                if self.config.enable_active_content_checks and is_macro_template(file_path):
+                    from .report import Finding as _Finding
+                    from .enums import ThreatID as _TID, Severity as _Sev
+                    findings.append(_Finding(
+                        threat_id=_TID.T2_ACTIVE_CONTENT,
+                        severity=_Sev.MEDIUM,
+                        title="Macro-Enabled Template File",
+                        explain=(
+                            "File extension indicates a macro-enabled template "
+                            "(.dotm/.xltm/.potm/.xlsm/.pptm). These formats execute "
+                            "macros on open by design and carry elevated risk. "
+                            "Suppress via allow-list if the file is trusted."
+                        ),
+                        evidence={"extension": file_path.rsplit(".", 1)[-1].lower()},
+                        confidence=0.80,
+                        module="scanner.macro_template",
+                    ))
+
                 return findings
 
             try:
-                fast_findings = await loop.run_in_executor(
-                    self._executor, _run_fast_scan
+                fast_findings = await asyncio.wait_for(
+                    loop.run_in_executor(self._executor, _run_fast_scan),
+                    timeout=self.config.limits.fast_scan_timeout_ms / 1000.0,
+                )
+            except asyncio.TimeoutError:
+                log_ctx.error("Fast scan timed out")
+                report.add(
+                    Finding(
+                        threat_id=ThreatID.T6_DOS,
+                        severity=Severity.HIGH,
+                        title="Fast scan timed out",
+                        explain="Document structure analysis exceeded time limit — possible DoS payload.",
+                        module="stage.fast_scan",
+                    )
                 )
             except Exception as e:
                 log_ctx.error("Fast scan error", error=str(e))
@@ -232,13 +475,38 @@ class Scanner:
         report.timings_ms["fast_scan"] = t.duration_ms
         report.findings.extend(fast_findings)
 
+        # B.7: Recursively scan plain ZIP archives — run synchronously in executor
+        # so we reuse the existing scan() path for each extracted member.
+        if ftype == "zip" and self.config.enable_archive_scan:
+            await loop.run_in_executor(
+                self._executor, self._scan_archive, file_path, report, 0
+            )
+
         # Gating Logic
         fast_score = self.risk_model.calculate_risk(report.findings)
 
         # If Critical -> Stop
         if any(f.severity == Severity.CRITICAL for f in fast_findings):
             log_ctx.info("Critical fast finding, aborting deep scan")
-            report.risk_score = fast_score
+            custom_weights = effective_policy.custom_threat_weights if effective_policy else None
+            report.risk_score = self.risk_model.calculate_risk(
+                report.findings, custom_threat_weights=custom_weights
+            )
+            report.verdict = self.risk_model.get_verdict(report.risk_score)
+            return report
+
+        # T6 DOS HIGH → skip deep scan.  Confirmed-bomb documents can hang the
+        # Docling parser even with subprocess isolation; the fast scan finding
+        # is already sufficient to push the verdict to FLAG/BLOCK.
+        if any(
+            f.threat_id == ThreatID.T6_DOS and f.severity == Severity.HIGH
+            for f in fast_findings
+        ):
+            log_ctx.info("T6 DOS HIGH finding in fast scan — skipping deep scan")
+            custom_weights = effective_policy.custom_threat_weights if effective_policy else None
+            report.risk_score = self.risk_model.calculate_risk(
+                report.findings, custom_threat_weights=custom_weights
+            )
             report.verdict = self.risk_model.get_verdict(report.risk_score)
             return report
 
@@ -253,6 +521,8 @@ class Scanner:
             or (ftype == "docx" and self.config.enable_docx)
             or (ftype == "pptx" and self.config.enable_pptx)
             or (ftype == "xlsx" and self.config.enable_xlsx)
+            or (ftype == "rtf" and self.config.enable_rtf)
+            or (ftype == "html" and self.config.enable_html)
         ):
             should_deep_scan = True
 
@@ -278,6 +548,10 @@ class Scanner:
                         return parse_pptx(file_path, self.config)
                     elif ftype == "xlsx" and self.config.enable_xlsx:
                         return parse_xlsx(file_path, self.config)
+                    elif ftype == "rtf" and self.config.enable_rtf:
+                        return parse_rtf(file_path, self.config)
+                    elif ftype == "html" and self.config.enable_html:
+                        return parse_html(file_path, self.config)
                     return ParsedDocument(
                         file_path=file_path, file_type=ftype, text="", metadata={}
                     )
@@ -370,12 +644,36 @@ class Scanner:
 
             # 2c. Detectors
             with Timer() as t:
-                try:
+                _det_skipped: list[str] = []
 
-                    def _detectors_task():
-                        out = []
+                try:
+                    def _detectors_task() -> list[Finding]:
+                        out: list[Finding] = []
                         for det in self.detectors:
-                            out.extend(det.run(parsed_doc, self.config))
+                            breaker = self._breakers.get(det.name)
+                            if breaker is not None and breaker.state.value == "open":
+                                _det_skipped.append(det.name)
+                                log_ctx.warning(
+                                    "Detector circuit open — skipping",
+                                    detector=det.name,
+                                    failures=breaker.failure_count,
+                                )
+                                continue
+                            try:
+                                findings = (
+                                    breaker.call(det.run, parsed_doc, self.config)
+                                    if breaker is not None
+                                    else det.run(parsed_doc, self.config)
+                                )
+                                out.extend(findings)
+                            except CircuitOpenError:
+                                _det_skipped.append(det.name)
+                            except Exception as exc:
+                                log_ctx.warning(
+                                    "Detector error",
+                                    detector=det.name,
+                                    error=str(exc),
+                                )
                         return out
 
                     det_findings = await asyncio.wait_for(
@@ -395,6 +693,10 @@ class Scanner:
                     )
                 except Exception as e:
                     log_ctx.error("Detectors failed", error=str(e))
+
+                if _det_skipped:
+                    report.metadata["skipped_detectors"] = _det_skipped
+
             report.timings_ms["detectors"] = t.duration_ms
 
             # 2d. Antivirus (Optional)
@@ -450,14 +752,39 @@ class Scanner:
             }
 
         # Finalize
-        report.risk_score = self.risk_model.calculate_risk(report.findings)
+        custom_weights = effective_policy.custom_threat_weights if effective_policy else None
+        report.risk_score = self.risk_model.calculate_risk(
+            report.findings, custom_threat_weights=custom_weights
+        )
         report.verdict = self.risk_model.get_verdict(report.risk_score)
+
+        # Required-detector validation — record which required threat IDs had no findings
+        if effective_policy and effective_policy.required_detectors:
+            fired_threats = {f.threat_id.value for f in report.findings}
+            # Normalise "T4" → "T4_PROMPT_INJECTION" style prefix matching
+            missing = []
+            for req in effective_policy.required_detectors:
+                if not any(t == req or t.startswith(req + "_") for t in fired_threats):
+                    missing.append(req)
+            if missing:
+                report.metadata["missing_required_detectors"] = missing
+                log_ctx.warning("Required detectors produced no findings", missing=missing)
+
         log_ctx.info(
             "Scan complete", verdict=report.verdict.value, score=report.risk_score
         )
+
+        # Append immutable audit entry if a log path is configured
+        if self.config.audit_log_path:
+            try:
+                from .audit_log import AuditLog
+                AuditLog(self.config.audit_log_path).write(report)
+            except Exception as _audit_err:
+                log_ctx.warning("Audit log write failed", error=str(_audit_err))
+
         return report
 
-    def scan(self, file_path: str) -> ScanReport:
+    def scan(self, file_path: str, policy_name: Optional[str] = None) -> ScanReport:
         """Synchronous wrapper (blocking). Uses asyncio.run() for safety."""
         try:
             asyncio.get_running_loop()
@@ -466,16 +793,26 @@ class Scanner:
             is_running = False
 
         if is_running:
-            # Already inside an async context — run in a separate thread
-            # to avoid reentrancy bugs from nest_asyncio
             from concurrent.futures import ThreadPoolExecutor as _TPE
 
             with _TPE(max_workers=1) as pool:
-                future = pool.submit(asyncio.run, self.scan_async(file_path))
+                future = pool.submit(
+                    asyncio.run, self.scan_async(file_path, policy_name=policy_name)
+                )
                 return future.result()
         else:
-            return asyncio.run(self.scan_async(file_path))
+            return asyncio.run(self.scan_async(file_path, policy_name=policy_name))
+
+    # Alias for backward compatibility with CLI and external callers
+    scan_sync = scan
 
 
-def scan(file_path: str, config: Optional[ScanConfig] = None) -> ScanReport:
-    return Scanner(config=config).scan(file_path)
+def scan(
+    file_path: str,
+    config: Optional[ScanConfig] = None,
+    policy_name: Optional[str] = None,
+    policy_engine: Optional[PolicyEngine] = None,
+) -> ScanReport:
+    return Scanner(config=config, policy_engine=policy_engine).scan(
+        file_path, policy_name=policy_name
+    )

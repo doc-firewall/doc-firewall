@@ -6,6 +6,7 @@ from ..analyzers.base import ParsedDocument
 from ..config import ScanConfig
 from ..report import Finding
 from ..enums import ThreatID, Severity
+from ..utils.unicode_norm import normalize_text
 
 
 class MetadataInjectionDetector(Detector):
@@ -101,20 +102,25 @@ class MetadataInjectionDetector(Detector):
                 )
 
             # 3. Prompt Injection in Metadata (T8/T4 crossover)
-            # "Ignore previous instructions", "System Prompt"
-            pi_patterns = [
-                r"ignore\s+(?:all\s+)?previous\s+instructions",
-                r"system\s+prompt",
-                r"you\s+are\s+a\s+helper",
-                r"do\s+not\s+reveal",
-                r"rank\s+candidate\s+top",
-                r"override\s+instruction",
-                r"new\s+role\s+is",
-                r"documents\s+above\s+are",
-                r"interpret\s+this\s+document\s+as",
-            ]
-            for pat in pi_patterns:
-                if re.search(pat, content, re.IGNORECASE):
+            # Run the full compiled T4 pattern set (from ScanConfig) on each
+            # metadata field rather than a short hardcoded list of 9 patterns.
+            # Injections placed in PDF /Keywords or DOCX description that use
+            # any of the 50+ T4 regexes are caught here.
+            normalized = normalize_text(content)
+            if not hasattr(self, "_compiled_pi_patterns") or getattr(
+                self, "_last_pi_config_id", None
+            ) != id(config):
+                self._compiled_pi_patterns = []
+                for _cat, rules in config.prompt_injection_patterns.items():
+                    for pat, _weight in rules:
+                        self._compiled_pi_patterns.append(
+                            re.compile(pat, re.IGNORECASE)
+                        )
+                self._last_pi_config_id = id(config)
+
+            for compiled_pat in self._compiled_pi_patterns:
+                m = compiled_pat.search(normalized)
+                if m:
                     findings.append(
                         Finding(
                             threat_id=ThreatID.T8_METADATA_INJECTION,
@@ -122,9 +128,14 @@ class MetadataInjectionDetector(Detector):
                             title="Prompt Injection in Metadata",
                             explain=(
                                 "Potentially malicious instructions found in "
-                                "document metadata."
+                                "document metadata. Metadata is a common injection "
+                                "surface for documents processed by LLM/RAG pipelines."
                             ),
-                            evidence={"snippet": content[:100], "pattern": pat, "malicious_text": content[:250]},
+                            evidence={
+                                "snippet": content[:100],
+                                "match": m.group(0)[:80],
+                                "malicious_text": content[:250],
+                            },
                             module=self.name,
                             confidence=0.9,
                         )

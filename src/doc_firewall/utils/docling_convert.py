@@ -6,6 +6,50 @@ from typing import Any, Dict, Tuple
 from functools import lru_cache
 from ..logger import get_logger
 
+
+def _docling_subprocess_worker(
+    source: str,
+    max_num_pages: int,
+    max_file_size_bytes: int,
+    result_queue: Any,
+) -> None:
+    """Subprocess worker for Docling PDF conversion with process-level isolation.
+
+    Must be a module-level (non-nested) function so multiprocessing 'spawn'
+    can pickle and import it in the child process.
+    """
+    # Re-apply env guards — spawn creates a fresh interpreter, parent env is
+    # not inherited on all platforms.
+    os.environ["DOCLING_DISABLE_OCR"] = "1"
+    os.environ["RAPIDOCR_DISABLE_AUTO_DOWNLOAD"] = "1"
+    try:
+        from docling.document_converter import DocumentConverter, PdfFormatOption
+        from docling.datamodel.pipeline_options import PdfPipelineOptions
+        from docling.datamodel.document import InputFormat
+
+        pipeline_options = PdfPipelineOptions()
+        pipeline_options.do_ocr = False
+        pipeline_options.do_table_structure = False
+        pipeline_options.table_structure_options.do_cell_matching = False
+
+        conv = DocumentConverter(
+            allowed_formats=[InputFormat.PDF],
+            format_options={
+                InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+            },
+        )
+        result = conv.convert(
+            source,
+            raises_on_error=True,
+            max_num_pages=max_num_pages,
+            max_file_size=max_file_size_bytes,
+        )
+        text = result.document.export_to_markdown()
+        meta = result.document.dict()
+        result_queue.put(("ok", text, meta))
+    except Exception as exc:
+        result_queue.put(("err", str(exc), {}))
+
 logger = get_logger()
 
 try:
@@ -32,7 +76,7 @@ except ImportError:
 if HAS_DOCLING:
     _cached_converter = None
     
-    def _converter() -> DocumentConverter:
+    def _converter() -> "DocumentConverter":
         global _cached_converter
         if _cached_converter is None:
             import logging
@@ -63,7 +107,7 @@ if HAS_DOCLING:
         return _cached_converter
 
     import atexit
-    def _cleanup_converter():
+    def _cleanup_converter() -> None:
         global _cached_converter
         if _cached_converter is not None:
             _cached_converter = None
@@ -391,29 +435,57 @@ def _fallback_pdf(path: str) -> Tuple[str, Dict[str, Any]]:
 
 
 def convert_with_docling(
-    source: str, *, max_num_pages: int, max_file_size_bytes: int
+    source: str,
+    *,
+    max_num_pages: int,
+    max_file_size_bytes: int,
+    timeout_s: float = 30.0,
 ) -> Tuple[str, Dict[str, Any]]:
     logger.debug("convert_with_docling called", source=source)
     text = ""
     meta = {}
     docling_success = False
 
-    # 1. Try Docling for High-Quality Text/Table Parsing
+    # 1. Try Docling for High-Quality Text/Table Parsing.
+    # Docling's conv.convert() can hang indefinitely on bomb PDFs and cannot be
+    # interrupted from a thread (asyncio.wait_for only cancels the future).
+    # We isolate it in a subprocess so SIGKILL can terminate it on timeout.
     if HAS_DOCLING:
-        try:
-            conv = _converter()
-            result = conv.convert(
-                source,
-                raises_on_error=True,
-                max_num_pages=max_num_pages,
-                max_file_size=max_file_size_bytes,
+        import multiprocessing as _mp
+        import queue as _queue_mod
+
+        _ctx = _mp.get_context("spawn")
+        result_q = _ctx.Queue()
+        proc = _ctx.Process(
+            target=_docling_subprocess_worker,
+            args=(source, max_num_pages, max_file_size_bytes, result_q),
+            daemon=True,
+        )
+        proc.start()
+        proc.join(timeout=timeout_s)
+        if proc.is_alive():
+            logger.warning(
+                "Docling conversion timed out — terminating subprocess",
+                source=source,
+                timeout_s=timeout_s,
             )
-            text = result.document.export_to_markdown()
-            meta = result.document.dict()
-            docling_success = True
-        except Exception as e:
-            # Docling failed, proceed to use fallback for text
-            logger.debug("Docling conversion failed: %s", e)
+            proc.terminate()
+            proc.join(timeout=2)
+            if proc.is_alive():
+                proc.kill()
+                proc.join(1)
+            # docling_success stays False; fall through to fallback parser
+        else:
+            try:
+                status, result_text, result_meta = result_q.get_nowait()
+                if status == "ok":
+                    text = result_text
+                    meta = result_meta
+                    docling_success = True
+                else:
+                    logger.debug("Docling conversion failed in subprocess: %s", result_text)
+            except _queue_mod.Empty:
+                logger.debug("Docling subprocess exited without producing a result")
 
     # 2. Run Security Artifact Extraction (Fallback parser logic)
     # We do this ALWAYS to catch T7, T8, T9 specific artifacts that Docling might

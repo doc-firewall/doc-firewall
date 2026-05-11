@@ -26,7 +26,7 @@ PATTERNS = [
 class PiiDetector(Detector):
     name = "pii"
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.regexes = [(re.compile(p), name) for p, name in PATTERNS]
 
     def run(self, doc: ParsedDocument, config: ScanConfig) -> List[Finding]:

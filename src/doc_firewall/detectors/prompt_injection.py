@@ -64,12 +64,21 @@ class PromptInjectionDetector(Detector):
     ]
 
     def _clean_text(self, text: str) -> str:
-        # 1. NFKC Normalize
+        # 1. NFKC Normalize (also strips tag chars + variation selectors via unicode_norm)
         text = normalize_text(text)
         # 2. Remove zero-width chars (ZWSP, ZWNJ, ZWJ, etc.)
         text = re.sub(r"[\u200B-\u200D\uFEFF]", "", text)
         # 3. Remove control chars (except newlines/tabs)
         text = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", text)
+        # 4. B.16: Collapse inter-character spacing obfuscation.
+        # "i g n o r e   a l l..." \u2192 "ignore all..." so phrase matchers fire.
+        # Matches single characters separated by exactly one space/tab/NBSP;
+        # multi-space word boundaries are preserved.
+        text = re.sub(
+            r"(?<!\w)\w(?:[ \t\u00A0]\w){2,}(?!\w)",
+            lambda m: re.sub(r"[ \t\u00A0]", "", m.group(0)),
+            text,
+        )
         return text
 
     def run(self, doc: ParsedDocument, config: ScanConfig) -> List[Finding]:
@@ -123,11 +132,9 @@ class PromptInjectionDetector(Detector):
             if not raw_content:
                 continue
 
-            # If the text has high zero-width characters, it's likely ATS manipulation
-            ZERO_WIDTH = {"\u200b", "\u200c", "\u200d", "\ufeff"}
-            if sum(1 for ch in raw_content if ch in ZERO_WIDTH) >= 25:
-                continue
-
+            # 0.3 fix: ZW interleaving is T3 obfuscation \u2014 do NOT skip T4 scanning.
+            # _clean_text() already strips ZW chars; scanning the normalized text
+            # catches injections hidden by interleaved zero-width characters.
             content = self._clean_text(raw_content)
             findings, score = self._scan_text(content, source, config)
             total_score += score
@@ -155,8 +162,11 @@ class PromptInjectionDetector(Detector):
 
         return all_findings
 
-    # Maximum characters for regex scanning to mitigate ReDoS
-    _MAX_REGEX_SCAN_CHARS = 500_000
+    # Sliding-window sizes for regex and semantic scanning
+    _WINDOW_SIZE = 50_000   # 0.2 fix: full-doc coverage in overlapping windows
+    _WINDOW_OVERLAP = 500   # overlap catches phrases that straddle window boundaries
+    _SEM_CHUNK_SIZE = 1_000
+    _SEM_MAX_CHUNKS = 4     # evenly distributed across the full document
 
     def _scan_text(
         self, text: str, source: str, config: ScanConfig
@@ -164,29 +174,39 @@ class PromptInjectionDetector(Detector):
         # 1. Normalize
         clean_text = normalize_text(text)
 
-        # Cap input length: scan head + tail where injections typically hide
-        if len(clean_text) > self._MAX_REGEX_SCAN_CHARS:
-            half = self._MAX_REGEX_SCAN_CHARS // 2
-            clean_text = clean_text[:half] + " " + clean_text[-half:]
-
-        matches = []
+        matches: list = []
         total_score = 0.0
 
-        # 2. Regex Scanning
-        for entry in self._compiled_patterns:
-            m = entry["regex"].search(clean_text)
-            if m:
-                total_score += entry["weight"]
-                matches.append(
-                    {
-                        "category": entry["category"],
-                        "pattern": entry["pattern_str"],
-                        "match": m.group(0)[:50],  # Truncate match
-                        "weight": entry["weight"],
-                    }
-                )
+        # 2. Regex Scanning — overlapping windows cover the full document.
+        # Previously only head+tail 250K chars were scanned; injections placed
+        # at character 300,000+ evaded all regex/Aho-Corasick layers.
+        fired_patterns: set[str] = set()
+        pos = 0
+        while True:
+            end = min(pos + self._WINDOW_SIZE, len(clean_text))
+            window = clean_text[pos:end]
+            for entry in self._compiled_patterns:
+                key = entry["pattern_str"]
+                if key in fired_patterns:
+                    continue
+                m = entry["regex"].search(window)
+                if m:
+                    fired_patterns.add(key)
+                    total_score += entry["weight"]
+                    matches.append(
+                        {
+                            "category": entry["category"],
+                            "pattern": key,
+                            "match": m.group(0)[:50],
+                            "weight": entry["weight"],
+                        }
+                    )
+            if end >= len(clean_text):
+                break
+            pos += self._WINDOW_SIZE - self._WINDOW_OVERLAP
 
-        # 3. Semantic Analysis
+        # 3. Semantic Analysis — evenly distributed windows across full document.
+        # Previously only first+last 1000 chars were checked.
         if config.enable_semantic_scans and _HAS_TRANSFORMERS:
             # Lazy load model
             if PromptInjectionDetector._model is None:
@@ -195,16 +215,25 @@ class PromptInjectionDetector(Detector):
                         self._model_name
                     )
                 except Exception as e:
-                    # Fallback if download fails or whatever
                     logger.debug("Error loading SentenceTransformer model: %s", e)
 
             if PromptInjectionDetector._model:
                 try:
-                    # Check first 1000 chars and last 1000 chars
-                    # where injections commonly hide
-                    chunks = [clean_text[:1000]]
-                    if len(clean_text) > 1000:
-                        chunks.append(clean_text[-1000:])
+                    text_len = len(clean_text)
+                    if text_len <= self._SEM_CHUNK_SIZE:
+                        chunks = [clean_text]
+                    else:
+                        n = self._SEM_MAX_CHUNKS
+                        step = max(self._SEM_CHUNK_SIZE,
+                                   (text_len - self._SEM_CHUNK_SIZE) // (n - 1))
+                        starts = [min(i * step, text_len - self._SEM_CHUNK_SIZE)
+                                  for i in range(n)]
+                        seen: set[int] = set()
+                        chunks = []
+                        for s in starts:
+                            if s not in seen:
+                                seen.add(s)
+                                chunks.append(clean_text[s:s + self._SEM_CHUNK_SIZE])
 
                     sig_embs = PromptInjectionDetector._model.encode(
                         self._sem_signatures, convert_to_tensor=True

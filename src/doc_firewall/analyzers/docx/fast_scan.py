@@ -63,10 +63,39 @@ def _check_hidden_text_xml(content: bytes) -> list[tuple[str, str]]:
 
     return hits
 
+_CFB_MAGIC = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"
+
+
 def fast_scan_docx(file_path: str, config: ScanConfig) -> List[Finding]:
     findings = []
 
-    # Removed global try-except
+    # B.8: Password-protected Office file — encrypted DOCX/XLSX/PPTX files are
+    # wrapped in an OLE2 CFB container instead of a ZIP archive.  The scanner
+    # cannot read the plaintext; flag T1 MEDIUM so reviewers know the scan is
+    # incomplete.
+    try:
+        with open(file_path, "rb") as _f:
+            _magic = _f.read(8)
+        if _magic == _CFB_MAGIC:
+            findings.append(
+                Finding(
+                    threat_id=ThreatID.T1_MALWARE,
+                    severity=Severity.MEDIUM,
+                    title="Password-Protected Office Document (Encrypted CFB)",
+                    explain=(
+                        "File is wrapped in an encrypted OLE2/CFB container, "
+                        "indicating password protection. Content cannot be scanned; "
+                        "treat as unverified."
+                    ),
+                    evidence={"malicious_text": "OLE2/CFB magic bytes — file is encrypted"},
+                    confidence=0.90,
+                    module="fast_scan.docx.encrypt",
+                )
+            )
+            return findings
+    except OSError:
+        return findings
+
     if not zipfile.is_zipfile(file_path):
         return findings
 
@@ -80,7 +109,10 @@ def fast_scan_docx(file_path: str, config: ScanConfig) -> List[Finding]:
             (total_uncompressed / total_compressed) if total_compressed > 0 else 0
         )
 
-        # 1. Zip Bomb / DoS Checks
+        # 1. Zip Bomb / DoS Checks — return immediately on hard structural limits
+        # so we never iterate thousands of parts in a confirmed DoS document.
+        total_mb = total_uncompressed / (1024 * 1024)
+
         if part_count > config.limits.max_docx_parts:
             findings.append(
                 Finding(
@@ -94,12 +126,31 @@ def fast_scan_docx(file_path: str, config: ScanConfig) -> List[Finding]:
                     evidence={
                         "part_count": part_count,
                         "limit": config.limits.max_docx_parts,
+                        "malicious_text": f"{part_count} parts",
                     },
                     module="fast_scan.docx.structure",
                 )
             )
+            if overall_ratio > config.limits.max_docx_overall_expansion_ratio:
+                findings.append(
+                    Finding(
+                        threat_id=ThreatID.T6_DOS,
+                        severity=Severity.HIGH,
+                        title="Suspicious Compression Ratio",
+                        explain=(
+                            f"Compression ratio {overall_ratio:.0f}x exceeds limit "
+                            f"{config.limits.max_docx_overall_expansion_ratio}x — "
+                            "zip-bomb pattern."
+                        ),
+                        evidence={
+                            "overall_ratio": round(overall_ratio, 2),
+                            "malicious_text": f"ratio {overall_ratio:.0f}x",
+                        },
+                        module="fast_scan.docx.structure",
+                    )
+                )
+            return findings  # confirmed DoS — skip per-part iteration
 
-        total_mb = total_uncompressed / (1024 * 1024)
         if total_mb > config.limits.max_docx_total_uncompressed_mb:
             findings.append(
                 Finding(
@@ -110,17 +161,19 @@ def fast_scan_docx(file_path: str, config: ScanConfig) -> List[Finding]:
                         f"Uncompressed size {total_mb:.2f} MB exceeds limit "
                         f"{config.limits.max_docx_total_uncompressed_mb} MB."
                     ),
-                    evidence={"size_mb": total_mb},
+                    evidence={"size_mb": total_mb, "malicious_text": f"{total_mb:.1f} MB uncompressed"},
                     module="fast_scan.docx.structure",
                 )
             )
+            return findings  # confirmed DoS — skip per-part iteration
 
         suspicious_parts = 0
 
         # 2. Content Checks (VBA, Embeddings, Keywords)
-        # We only check 'word/document.xml' for keywords to save time
-
-        for z in infolist:
+        # Cap iteration to max_docx_parts to bound scan time even when the
+        # part count is just under the limit.
+        scan_limit = config.limits.max_docx_parts
+        for z in infolist[:scan_limit]:
             # Zip Bomb heuristic
             if z.file_size > config.limits.max_docx_single_part_mb * 1024 * 1024:
                 findings.append(
@@ -174,6 +227,66 @@ def fast_scan_docx(file_path: str, config: ScanConfig) -> List[Finding]:
                         module="fast_scan.docx.ole",
                     )
                 )
+                # B.12: Check embedded file for suspicious extensions or nested
+                # archives containing executables — a common dropper technique.
+                _B12_SUSPICIOUS = {
+                    "exe", "dll", "js", "ps1", "vbs", "bat", "cmd",
+                    "hta", "jar", "py", "sh", "msi", "scr",
+                }
+                _emb_ext = (
+                    z.filename.rsplit(".", 1)[-1].lower()
+                    if "." in z.filename else ""
+                )
+                if _emb_ext in _B12_SUSPICIOUS:
+                    findings.append(
+                        Finding(
+                            threat_id=ThreatID.T7_EMBEDDED_PAYLOAD,
+                            severity=Severity.CRITICAL,
+                            title=f"Suspicious Embedded File Extension (.{_emb_ext})",
+                            explain=(
+                                f"DOCX contains '{z.filename}' — a suspicious "
+                                f"extension (.{_emb_ext}) used in dropper attacks."
+                            ),
+                            evidence={"filename": z.filename, "extension": _emb_ext},
+                            confidence=0.90,
+                            module="fast_scan.docx.embedded_archive",
+                        )
+                    )
+                elif _emb_ext == "zip" and z.file_size < 8 * 1024 * 1024:
+                    try:
+                        import io as _io
+                        with zf.open(z) as _emb_f:
+                            _emb_data = _emb_f.read(8 * 1024 * 1024)
+                        with zipfile.ZipFile(_io.BytesIO(_emb_data)) as _inner:
+                            for _iname in _inner.namelist():
+                                _iext = (
+                                    _iname.rsplit(".", 1)[-1].lower()
+                                    if "." in _iname else ""
+                                )
+                                if _iext in _B12_SUSPICIOUS:
+                                    findings.append(
+                                        Finding(
+                                            threat_id=ThreatID.T7_EMBEDDED_PAYLOAD,
+                                            severity=Severity.HIGH,
+                                            title="Suspicious File in Embedded Archive",
+                                            explain=(
+                                                f"Embedded archive '{z.filename}' "
+                                                f"contains '{_iname}' (.{_iext})."
+                                            ),
+                                            evidence={
+                                                "archive": z.filename,
+                                                "member": _iname,
+                                                "extension": _iext,
+                                            },
+                                            confidence=0.85,
+                                            module="fast_scan.docx.embedded_archive",
+                                        )
+                                    )
+                                    break
+                    except Exception as _e:
+                        logger.debug(
+                            "Error reading embedded archive %s: %s", z.filename, _e
+                        )
 
             # External Relationships
             if z.filename.endswith(".rels"):
@@ -198,6 +311,76 @@ def fast_scan_docx(file_path: str, config: ScanConfig) -> List[Finding]:
                             )
                 except Exception as e:
                     logger.debug("Error reading %s: %s", z.filename, e)
+
+            # B.15: CustomXML parts scan — customXml/ parts are read by Office
+            # automation and LLM document loaders but lie outside the body-text
+            # scan area and are an unscanned injection surface.
+            if z.filename.startswith("customXml/") and z.filename.endswith(".xml"):
+                try:
+                    with zf.open(z) as f:
+                        xml_content = f.read(256 * 1024)
+                    xml_lower = xml_content.lower()
+                    for kw in config.prompt_injection_keywords_bytes:
+                        if kw in xml_lower:
+                            findings.append(
+                                Finding(
+                                    threat_id=ThreatID.T4_PROMPT_INJECTION,
+                                    severity=Severity.MEDIUM,
+                                    title="Prompt Injection in DOCX CustomXML Part",
+                                    explain=(
+                                        f"Found injection keyword "
+                                        f"'{kw.decode('ascii', errors='replace')}' "
+                                        f"in {z.filename}. CustomXML parts are "
+                                        "extracted by LLM document loaders but bypass "
+                                        "body-text scanning."
+                                    ),
+                                    evidence={
+                                        "keyword": kw.decode("ascii", errors="replace"),
+                                        "filename": z.filename,
+                                    },
+                                    confidence=0.65,
+                                    module="fast_scan.docx.customxml",
+                                )
+                            )
+                            break  # one finding per customXml part
+                except Exception as e:
+                    logger.debug("Error reading %s: %s", z.filename, e)
+
+            # XML Entity Depth Check (T6 DoS) — item 0.9
+            # defusedxml blocks XXE but not all entity-expansion attacks.
+            # Check any XML part for <!ENTITY declarations with nested refs.
+            if z.filename.endswith(".xml") and config.enable_dos_checks:
+                try:
+                    with zf.open(z) as f:
+                        part_head = f.read(8192)  # DOCTYPE is always in the preamble
+                    if b"<!ENTITY" in part_head:
+                        # Count nesting depth: entities that reference other entities
+                        entity_defs = re.findall(rb'<!ENTITY\s+\S+\s+"([^"]*)"', part_head)
+                        max_depth = max(
+                            (d.count(b"&") for d in entity_defs), default=0
+                        )
+                        if max_depth > 3:
+                            findings.append(
+                                Finding(
+                                    threat_id=ThreatID.T6_DOS,
+                                    severity=Severity.HIGH,
+                                    title="XML Entity Expansion (Billion Laughs)",
+                                    explain=(
+                                        f"Part '{z.filename}' declares XML entities "
+                                        f"with nesting depth {max_depth} — a "
+                                        "quadratic entity-expansion (billion-laughs) "
+                                        "pattern that causes parser exhaustion."
+                                    ),
+                                    evidence={
+                                        "filename": z.filename,
+                                        "entity_depth": max_depth,
+                                    },
+                                    confidence=0.90,
+                                    module="fast_scan.docx.dos",
+                                )
+                            )
+                except Exception as e:
+                    logger.debug("Error checking XML entities in %s: %s", z.filename, e)
 
             # Keyword Search in document.xml
             if z.filename == "word/document.xml":

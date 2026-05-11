@@ -11,7 +11,7 @@ logger = get_logger()
 class GenericCLIEngine(AntivirusEngine):
     name: str = "generic_cli"
 
-    def __init__(self, command_template: str, infected_exit_codes: List[int] = None):
+    def __init__(self, command_template: str, infected_exit_codes: List[int] = None) -> None:  # noqa: B006
         """
         :param command_template: Command string with {path} placeholder.
                                  Example: "sophos_scan --file {path}"

@@ -99,3 +99,7 @@ parse_check*.py
 check_*.py
 *_patch.py
 *.py_patch.py
+
+# Generated scan result artifacts
+scan_results.md
+scan_results_*.md

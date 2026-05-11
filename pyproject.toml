@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc-firewall"
-version = "0.3.11"
+version = "0.4.0"
 description = "LLM-aware document intake security scanning for PDF/DOCX/PPTX/XLSX"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -57,11 +57,16 @@ api = [
   "python-multipart>=0.0.27",
   "requests>=2.32.3"
 ]
+formats = [
+  "striprtf>=0.0.26",
+  "html5lib>=1.1"
+]
 dev = [
     "build",
     "twine",
     "pytest>=9.0.3",
     "ruff",
+    "hypothesis>=6.100.0",
 ]
 
 [project.urls]
@@ -76,9 +81,7 @@ doc-firewall = "doc_firewall.cli.main:main"
 [tool.setuptools]
 package-dir = {"" = "src"}
 
-[tool.ruff]
-line-length = 88
-target-version = "py310"
+# Ruff config lives in ruff.toml — see that file.
 
 [tool.pytest.ini_options]
 markers = [

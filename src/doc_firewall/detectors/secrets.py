@@ -18,7 +18,7 @@ PATTERNS = [
 class SecretsDetector(Detector):
     name = "secrets"
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.regexes = [(re.compile(p), name) for p, name in PATTERNS]
 
     def run(self, doc: ParsedDocument, config: ScanConfig) -> List[Finding]:

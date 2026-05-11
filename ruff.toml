@@ -1,0 +1,12 @@
+line-length = 100
+target-version = "py310"
+
+[lint]
+select = ["E", "F", "B", "I"]   # pycodestyle, Pyflakes, bugbear, isort
+ignore = [
+    "E501",  # line too long — enforced by formatter, not linter
+    "B008",  # do not perform function calls in default arguments (Pydantic Field pattern)
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["E501", "F811"]  # long test strings and redefinitions are fine in tests

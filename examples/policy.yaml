@@ -1,0 +1,55 @@
+# DocFirewall Policy File
+#
+# Load with:
+#   from doc_firewall import PolicyEngine
+#   engine = PolicyEngine("examples/policy.yaml")
+#
+# Or on the CLI:
+#   doc-firewall scan ./resumes/ --policy-file examples/policy.yaml --policy-name hr-intake
+
+policies:
+
+  # ── HR resume intake ────────────────────────────────────────────────────────
+  # Strict profile with elevated weight on ATS manipulation (T9) and prompt
+  # injection (T4) — the two primary resume attack vectors.
+  - name: hr-intake
+    applies_to: ["*.pdf", "*.docx"]
+    profile: strict
+    required_detectors:
+      - T4   # prompt injection must be checked
+      - T9   # ATS manipulation must be checked
+    custom_threat_weights:
+      T9_ATS_MANIPULATION: 0.9    # raise from default 0.5 → near-critical
+      T4_PROMPT_INJECTION: 0.9    # raise from default 0.8 → near-critical
+    deny_list:
+      - sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+        comment: "Example: permanently blocked document"
+    allow_list:
+      - sha256: "1111111111111111111111111111111111111111111111111111111111111111"
+        comment: "Example: pre-approved template document"
+
+  # ── Legal contract review ───────────────────────────────────────────────────
+  # Strict profile but T9 weight lowered — legal documents are not ATS targets.
+  - name: legal-review
+    applies_to: ["*.pdf", "*.docx", "*.pptx"]
+    profile: strict
+    required_detectors:
+      - T4
+      - T7   # embedded payload check
+      - T8   # metadata injection check
+    custom_threat_weights:
+      T9_ATS_MANIPULATION: 0.1   # not relevant for contracts
+
+  # ── Internal developer tools ────────────────────────────────────────────────
+  # Lenient profile for low-risk internal uploads (config files, reports).
+  - name: dev-tools
+    applies_to: ["*.xlsx", "*.html", "*.rtf"]
+    profile: lenient
+    custom_threat_weights:
+      T9_ATS_MANIPULATION: 0.0   # disable ATS threat weight entirely
+
+  # ── Wildcard fallback ───────────────────────────────────────────────────────
+  # Applies to any file not matched by a more specific policy above.
+  - name: default
+    applies_to: ["*"]
+    profile: balanced

@@ -11,17 +11,33 @@ class Finding:
     title: str
     explain: str
     evidence: Dict[str, Any] = field(default_factory=dict)
-    """
-    Dictionary capturing forensics of the matched threat.
-    Includes 'malicious_text' restricted to the first 250 characters.
-    """
     location: Optional[str] = None
     module: Optional[str] = None
     # Default is 0.5 (neutral/unknown) rather than 1.0 to prevent unset
     # findings from contributing full weight to the risk score (R1).
-    # Detectors that have calibrated confidence should set this explicitly.
     confidence: float = 0.5
     weight: float = 0.0  # Effective weight calculated by Risk Model
+
+    # B.19 — Structured threat intelligence fields (optional; populated where known)
+    cve: Optional[str] = None               # e.g. "CVE-2017-11882"
+    mitre_technique: Optional[str] = None   # e.g. "T1059.007"
+    attack_objective: Optional[str] = None  # Plain-English attacker goal
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Finding):
+            return NotImplemented
+        return (
+            self.threat_id == other.threat_id
+            and self.severity == other.severity
+            and self.title == other.title
+            and self.explain == other.explain
+            and self.location == other.location
+            and self.module == other.module
+            and round(self.confidence, 6) == round(other.confidence, 6)
+        )
+
+    def __hash__(self) -> int:
+        return hash((self.threat_id, self.severity, self.title, self.module))
 
 
 @dataclass
@@ -42,6 +58,20 @@ class ScanReport:
     # Optional field to return the parsed content (e.g., safe markdown)
     # This allows developers to use DocFirewall as a single entry point for intake
     content: Optional[Dict[str, Any]] = None
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ScanReport):
+            return NotImplemented
+        return (
+            self.file_path == other.file_path
+            and self.sha256 == other.sha256
+            and self.verdict == other.verdict
+            and round(self.risk_score, 6) == round(other.risk_score, 6)
+            and self.findings == other.findings
+        )
+
+    def __hash__(self) -> int:
+        return hash((self.sha256, self.verdict))
 
     def add(self, finding: Finding) -> None:
         self.findings.append(finding)

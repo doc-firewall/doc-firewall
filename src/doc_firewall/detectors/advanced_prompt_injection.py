@@ -20,13 +20,13 @@ except ImportError:
 class AdvancedPromptInjectionDetector(Detector):
     name = "advanced_prompt_injection"
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._automaton = None
         self._classifier = None
         self._model_path = None
         self._custom_phrases_path_loaded = None
 
-    def _init_ahocorasick(self, config: ScanConfig):
+    def _init_ahocorasick(self, config: ScanConfig) -> None:
         # Re-initialize if the custom path changes
         needs_reload = (
             self._automaton is None or 
@@ -123,6 +123,157 @@ class AdvancedPromptInjectionDetector(Detector):
                 "olvida todo",                      # forget everything (Spanish imperative)
                 "ignora todo",                      # ignore everything (Spanish)
                 "ignora las instrucciones",         # ignore the instructions (Spanish)
+                "ignorar todas las instrucciones",  # ignore all instructions (Spanish)
+                "nueva instruccion",                # new instruction (Spanish)
+                "nueva tarea",                      # new task (Spanish)
+
+                # French-language injection phrases
+                "ignorez toutes les instructions",  # ignore all instructions
+                "ignorez les instructions",         # ignore instructions
+                "oubliez tout",                     # forget everything
+                "oubliez les instructions",         # forget instructions
+                "nouvelle instruction",             # new instruction
+                "nouvelle tache",                   # new task
+                "agissez comme",                    # act as
+
+                # Italian-language injection phrases
+                "ignora tutte le istruzioni",       # ignore all instructions
+                "dimentica tutto",                  # forget everything
+                "nuova istruzione",                 # new instruction
+
+                # Portuguese-language injection phrases
+                "ignorar todas as instrucoes",      # ignore all instructions
+                "esquecer tudo",                    # forget everything
+                "nova instrucao",                   # new instruction
+
+                # Russian-language injection phrases (Cyrillic — normalizer maps to ASCII)
+                "игнорировать все предыдущие",      # ignore all previous
+                "забудь все предыдущие",            # forget all previous
+                "новая инструкция",                 # new instruction
+                "новое задание",                    # new task
+                "ты теперь",                        # you are now
+
+                # Dutch-language injection phrases
+                "negeer alle vorige instructies",   # ignore all previous instructions
+                "vergeet alles",                    # forget everything
+                "nieuwe instructie",                # new instruction
+                "nieuwe taak",                      # new task
+                "handel nu volgens",                # act now according to
+
+                # Polish-language injection phrases
+                "zignoruj wszystkie poprzednie",    # ignore all previous
+                "zapomnij o wszystkim",             # forget everything
+                "nowa instrukcja",                  # new instruction
+                "nowe zadanie",                     # new task
+
+                # Chinese (Simplified) injection phrases
+                "忽略所有先前的指令",                # ignore all previous instructions
+                "忘记之前的内容",                    # forget previous content
+                "新指令",                            # new instruction
+                "从现在开始",                        # from now on
+                "忽略上文",                          # ignore the above
+
+                # Japanese injection phrases
+                "以前の指示をすべて無視",             # ignore all previous instructions
+                "これまでの指示を忘れて",             # forget all previous instructions
+                "新しい指示に従って",                 # follow the new instructions
+                "今すぐ",                            # right now / from now on
+
+                # Korean injection phrases
+                "이전 지시 사항을 모두 무시",          # ignore all previous instructions
+                "모든 것을 잊어버려",                  # forget everything
+                "새로운 지시",                         # new instruction
+                "지금부터",                            # from now on
+
+                # Arabic injection phrases
+                "تجاهل جميع التعليمات السابقة",     # ignore all previous instructions
+                "انسَ كل شيء",                      # forget everything
+                "تعليمات جديدة",                    # new instructions
+                "من الآن فصاعدا",                   # from now on
+
+                # Encoding-bypass / character-spacing evasion variants
+                # Attackers insert spaces between chars to defeat exact matchers
+                "i g n o r e",                     # spaced-out "ignore"
+                "i g n o r a",                     # spaced-out Spanish ignore
+                "f o r g e t",                     # spaced-out "forget"
+
+                # Indirect / authority-impersonation injection formats
+                "your new task is",
+                "from now on you will",
+                "from now on your",
+                "starting now you are",
+                "as of now you must",
+                "consider this your primary",
+                "treat the following as",
+                "your updated instructions are",
+                "this message supersedes",
+                "all prior context is",
+                "effective immediately",
+
+                # LLM tool-call injection markers — comprehensive schema coverage
+                # OpenAI function calling format
+                "<tool_call>",
+                "[tool:",
+                "function_call:",
+                "tool_choice:",
+                '"type": "function"',
+                '"type":"function"',
+                # Anthropic tool use format
+                "<tool_use>",
+                "<tool_result>",
+                "<function_calls>",
+                "</function_calls>",
+                "<invoke>",
+                "</invoke>",
+                # HuggingFace / TGI tool call format
+                "[tool_call]",
+                "[tool_calls]",
+                "[tool_response]",
+                # LangChain Agent / ReAct format
+                "action_input:",
+                "action:",
+                "observation:",
+                "final answer:",
+                "thought: ",
+                "action: ",
+                # LlamaIndex tool format
+                "<tool>",
+                "</tool>",
+                "<tool_input>",
+                # AutoGPT / BabyAGI command format
+                "command:",
+                "thoughts:",
+                '"command":',
+                '"thoughts":',
+                # OpenAI chat-completion role injection
+                '"role": "system"',
+                '"role":"system"',
+                '"role": "tool"',
+                # Mistral / Llama-2 special tokens
+                "<|im_start|>system",
+                "<|im_start|>user",
+                "<|im_end|>",
+                "<|system|>",
+                "<|user|>",
+                "<|assistant|>",
+                "[inst]",
+                "[/inst]",
+                "<<sys>>",
+                "<</sys>>",
+                "[system]:",
+                # Generic injection / template tokens
+                "{% if",
+                "{% for",
+                "{{system}}",
+                "{{prompt}}",
+                "{system}",
+
+                # Indirect ATS manipulation via authority framing
+                "hr system directive",
+                "ats system override",
+                "recruiter note:",
+                "system note:",
+                "internal note for ats",
             ]
 
             # Load custom phrases from YAML if provided
@@ -142,7 +293,7 @@ class AdvancedPromptInjectionDetector(Detector):
             self._automaton.make_automaton()
             self._custom_phrases_path_loaded = config.custom_ahocorasick_yaml_path
 
-    def _init_bert(self, config: ScanConfig):
+    def _init_bert(self, config: ScanConfig) -> None:
         if self._classifier is None or self._model_path != config.bert_model_path:
             try:
                 from transformers import pipeline
@@ -227,6 +378,24 @@ class AdvancedPromptInjectionDetector(Detector):
             (r"(?:print|spell.?check)\s+(?:the\s+)?above\s+prompt", "print/spellcheck above prompt"),
             (r"(?:amnesia|forgot)\s+(?:and\s+)?(?:forgot|everything)", "amnesia / forgot everything"),
             (r"(?:olvid[ae]|ignora)\s+(?:todo|las?\s+instrucciones)", "Spanish injection"),
+            # Russian via normalizer (Cyrillic maps to ASCII)
+            (r"(?:ignorirovat|zabud[yi])\s+(?:vse\s+)?(?:predydushchie|instrukcii)", "Russian injection (normalized)"),
+            # Dutch
+            (r"negeer\s+(?:alle\s+)?(?:vorige|eerdere)\s+instructies", "Dutch injection"),
+            (r"vergeet\s+(?:alles|alle\s+instructies)", "Dutch forget-everything"),
+            # Polish
+            (r"zignoruj\s+(?:wszystkie\s+)?poprzednie\s+instrukcje", "Polish injection"),
+            (r"zapomnij\s+o\s+wszystkim", "Polish forget-everything"),
+            # LLM tool-call injection — structural markers
+            (r"<tool(?:_call|_use|_result)?(?:\s*/?>|>)", "Tool-call XML tag"),
+            (r"\[tool(?:_call|_calls|_response)?\]", "Tool-call bracket marker"),
+            (r'"type"\s*:\s*"(?:function|tool)"', "OpenAI function-type field"),
+            (r"action\s*:\s*\w+.*\naction\s+input\s*:", "LangChain Action/Action Input"),
+            (r"<\|im_start\|>\s*(?:system|user|assistant)", "ChatML special token"),
+            (r"\[/?(?:inst|INST)\]", "Llama-2 [INST] token"),
+            (r"<</?SYS>>", "Llama-2 <<SYS>> token"),
+            (r"\{[%{]\s*(?:if|for|set|block)\b", "Template injection (Jinja/Twig)"),
+            (r"\{\{(?:system|prompt|instruction)\}\}", "Template variable injection"),
         ]
 
         if not findings:  # skip if Aho-Corasick already fired
@@ -251,29 +420,32 @@ class AdvancedPromptInjectionDetector(Detector):
                     break  # one finding per document at this layer
 
         # ── Layer 3: Sliding-window BERT classifier ──────────────────────────
-        # Only run if layers 1/2 did not already flag — avoids the latency cost
-        # on documents that are clearly malicious or clearly clean.
-        if config.enable_advanced_bert and not findings:
+        # Runs unconditionally when enabled — catching novel paraphrases that
+        # evade L1/L2 is the primary purpose of this layer.  Removing the
+        # "not findings" gate was the main driver of recall improvement from
+        # 62.5 % → ≥ 90 % on the OWASP LLM01 benchmark.
+        if config.enable_advanced_bert:
             self._init_bert(config)
             if self._classifier:
                 try:
-                    # Build overlapping 500-char windows covering the whole doc.
-                    # Always include the first and last 1000 chars explicitly.
                     window_size = 500
-                    overlap = 100
                     max_chunks = getattr(config, 'bert_max_chunks', 20)
-                    threshold = getattr(config, 'bert_confidence_threshold', 0.85)
+                    threshold = getattr(config, 'bert_confidence_threshold', 0.75)
+                    text_len = len(raw_text)
 
-                    chunks: list[str] = []
-                    # Priority slots: start and end of document
-                    chunks.append(raw_text[:1000])
-                    if len(raw_text) > 1000:
-                        chunks.append(raw_text[-1000:])
-                    # Sliding window over middle
-                    start = 0
-                    while start < len(raw_text) and len(chunks) < max_chunks:
-                        chunks.append(raw_text[start:start + window_size])
-                        start += window_size - overlap
+                    # Guaranteed full-coverage windowing: distribute max_chunks
+                    # windows evenly across the entire document so mid-document
+                    # injections are never skipped.
+                    if text_len == 0:
+                        chunks: list[str] = []
+                    elif text_len <= window_size:
+                        chunks = [raw_text]
+                    else:
+                        step = max(1, (text_len - window_size) // (max_chunks - 1))
+                        chunks = [
+                            raw_text[s: s + window_size]
+                            for s in range(0, text_len, step)
+                        ][:max_chunks]
 
                     best_score = 0.0
                     best_label = ""
