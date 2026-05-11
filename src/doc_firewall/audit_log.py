@@ -52,9 +52,15 @@ def _sha256_json(obj: dict) -> str:
 
 
 def _hash_optional(value: Optional[str]) -> Optional[str]:
-    """Return a deterministic HMAC-SHA256 hex digest for pseudonymization, or None."""
+    """Return a deterministic HMAC-SHA256 hex digest for pseudonymization, or None.
+
+    This is pseudonymization of audit metadata (key IDs, IP addresses), not
+    password storage.  HMAC-SHA256 with a deployment-specific secret key is the
+    correct algorithm here — not a password KDF.
+    """
     if value is None:
         return None
+    # lgtm[py/weak-cryptographic-algorithm] - pseudonymization, not password hashing
     return hmac.new(_PSEUDONYM_KEY, value.encode("utf-8"), "sha256").hexdigest()
 
 
