@@ -9,9 +9,13 @@ Key store format (JSON file pointed to by ScanConfig.api_keys_path):
     ]
   }
 
-The raw key is NEVER stored.  Only its SHA-256 hex digest is kept on disk.
-Clients send the raw key in the X-API-Key header; the middleware hashes it
-and compares against stored digests.
+The raw key is NEVER stored.  Only its hash digest is kept on disk.
+New keys use PBKDF2-HMAC-SHA256 (stored as 'pbkdf2_sha256$iters$salt$dk').
+Legacy entries may use a plain SHA-256 hex digest; both formats are accepted.
+
+Validation cache: after the first successful PBKDF2 verification the result
+is cached (keyed on HMAC-SHA256 of the raw key) for CACHE_TTL_S seconds so
+that repeat requests do not pay the PBKDF2 cost on every call.
 
 Rate limiting: in-memory token bucket, one bucket per key id.  State is
 process-local and resets on restart — suitable for single-instance deployments.
@@ -22,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import time
 import threading
 from pathlib import Path
@@ -32,13 +37,24 @@ from typing import Optional
 # Key store
 # ---------------------------------------------------------------------------
 
+_PBKDF2_ITERATIONS = 310_000
+_PBKDF2_SALT_BYTES = 16
+# TTL for the in-process validation cache (seconds).  Keeps PBKDF2 cost
+# off the hot path while bounding how long a revoked key stays valid.
+_CACHE_TTL_S = 300
+# HMAC key used only to derive the cache lookup token — never stored.
+_CACHE_HMAC_KEY: bytes = os.environb.get(b"DOC_FIREWALL_CACHE_KEY", b"doc-firewall-key-cache-v1")
+
+
 class KeyStore:
     """Loads and validates API keys from a JSON file."""
 
     def __init__(self, path: str) -> None:
         self._path = Path(path)
-        self._keys: dict[str, str] = {}  # hash → id
+        self._keys: dict[str, str] = {}  # stored_hash → id
         self._lock = threading.Lock()
+        # cache: {hmac_token: (key_id, expiry_monotonic)}
+        self._cache: dict[str, tuple[str, float]] = {}
         self._load()
 
     def _load(self) -> None:
@@ -50,6 +66,7 @@ class KeyStore:
                     for entry in data.get("keys", [])
                     if "hash" in entry and "id" in entry
                 }
+                self._cache.clear()  # invalidate cache on reload
         except Exception as exc:
             raise RuntimeError(f"Failed to load API key store from {self._path}: {exc}") from exc
 
@@ -57,23 +74,51 @@ class KeyStore:
         """Hot-reload key store from disk (call on SIGHUP)."""
         self._load()
 
+    @staticmethod
+    def _verify_key(raw_key: str, stored_hash: str) -> bool:
+        """Verify raw_key against a stored hash (PBKDF2 or legacy SHA-256)."""
+        parts = stored_hash.split("$")
+        if len(parts) == 4 and parts[0] == "pbkdf2_sha256":
+            try:
+                iterations = int(parts[1])
+                salt = bytes.fromhex(parts[2])
+                expected = bytes.fromhex(parts[3])
+            except (ValueError, TypeError):
+                return False
+            candidate = hashlib.pbkdf2_hmac("sha256", raw_key.encode("utf-8"), salt, iterations)
+            return hmac.compare_digest(candidate, expected)
+        # Legacy: plain SHA-256 hex
+        candidate_legacy = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()  # lgtm[py/weak-cryptographic-algorithm]
+        return hmac.compare_digest(candidate_legacy, stored_hash)
+
     def validate(self, raw_key: str) -> Optional[str]:
-        """Return key id if valid, None otherwise."""
-        # API keys are randomly-generated, high-entropy tokens — not passwords.
-        # SHA-256 is the industry-standard storage format for API keys (GitHub,
-        # Stripe, etc.).  hmac.compare_digest gives constant-time comparison to
-        # prevent timing-based enumeration of stored hashes.
-        candidate = hashlib.sha256(raw_key.encode()).hexdigest()  # lgtm[py/weak-cryptographic-algorithm]
+        """Return key id if valid, None otherwise.
+
+        Results are cached for _CACHE_TTL_S seconds so PBKDF2 is only
+        computed once per unique key per TTL window.
+        """
+        cache_token = hmac.new(_CACHE_HMAC_KEY, raw_key.encode(), "sha256").hexdigest()
+        now = time.monotonic()
         with self._lock:
+            cached = self._cache.get(cache_token)
+            if cached is not None and cached[1] > now:
+                return cached[0]
             for stored_hash, key_id in self._keys.items():
-                if hmac.compare_digest(candidate, stored_hash):
+                if self._verify_key(raw_key, stored_hash):
+                    self._cache[cache_token] = (key_id, now + _CACHE_TTL_S)
                     return key_id
         return None
 
     @staticmethod
     def hash_key(raw_key: str) -> str:
-        """Utility: compute the hash to store in the key store JSON."""
-        return hashlib.sha256(raw_key.encode()).hexdigest()  # lgtm[py/weak-cryptographic-algorithm]
+        """Compute a PBKDF2-HMAC-SHA256 hash suitable for the key store JSON.
+
+        Returns a string in the format::
+            pbkdf2_sha256$<iterations>$<salt_hex>$<dk_hex>
+        """
+        salt = os.urandom(_PBKDF2_SALT_BYTES)
+        dk = hashlib.pbkdf2_hmac("sha256", raw_key.encode("utf-8"), salt, _PBKDF2_ITERATIONS)
+        return f"pbkdf2_sha256${_PBKDF2_ITERATIONS}${salt.hex()}${dk.hex()}"
 
 
 # ---------------------------------------------------------------------------
