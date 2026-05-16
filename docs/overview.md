@@ -70,6 +70,18 @@ In the context of DocFirewall, an **embedded payload** refers to hidden executab
     ---
     Detects SEO poisoning and white-on-white text used to game ranking algorithms.
 
+-   :material-link-variant: **Indirect / Multi-Hop Injection (T10)**
+    ---
+    Flags external-reference + fetch-instruction co-occurrence and agent tool-call schemas pointing at remote payloads (`data:`/`smb:`/UNC/raw-GitHub URIs).
+
+-   :material-database-alert: **RAG / KB Poisoning (T11)**
+    ---
+    Detects authority-assertion patterns, sentence-duplication flooding, false citations, and chunk-boundary split injection targeting vector stores.
+
+-   :material-account-alert: **Social Engineering (T12)**
+    ---
+    Tri-signal urgency/authority/action-demand co-occurrence with HIGH overrides for credential harvesting, fake legal threats, and crypto / gift-card / tech-support scams.
+
 </div>
 
 ## Performance
