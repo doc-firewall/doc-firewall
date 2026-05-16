@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-05-16
+
+### Added
+
+- **3 new formats (9 total)** — legacy OLE `.doc`/`.xls`/`.ppt` (VBA-stomping / `vbaProject.bin`), CSV/TSV (formula injection, DDE), OpenDocument `.odt`/`.ods`/`.odp` (macro:// CVE-2023-2255).
+- PDF `/JBIG2Decode` (CVE-2021-30860), `/RichMedia`, `/3D`, `/GoToE`; Excel `veryHidden` + inline XLM; HTML SVG/MathML/CSS-`javascript:`/atob+Blob smuggling; Mach-O/WASM/ISO/RAR/7z embedded-binary signatures; PDF annotation subtypes + AcroForm `/V`/`/DV` field defaults; embedded media metadata (ID3/MP4/RIFF).
+- Evasion resistance — math-script + reversed-text matching, expanded Unicode confusables, separator normalization, edit-distance-1 fuzzy matching, multilingual phrase set expanded to 22 languages.
+- Broader indirect-injection URI vocabulary (`data:`/`smb:`/UNC/raw-GitHub fire HIGH); RAG chunk-boundary split detection; crypto / gift-card / tech-support social-engineering patterns; opt-in QR-code decoding (quishing) + PDF/ODF image OCR.
+- Page-tree & slide-master cycle DoS detection; PDF `/ActualText` overlay density; per-section ATS keyword check; risk-model calibration script.
+- Detector regex/automaton now pre-compiled at `Scanner` construction (first scan no longer slower than steady-state); 220-document benign corpus with SHA-256 manifest and CI false-positive gate (≤1% balanced, ≤3% strict). Test suite 192 → 301.
+
+### Changed
+
+- **PII detector** now wired into the Scanner (was defined but unused); threat ID corrected `T2` → `T8`; HIPAA Safe-Harbor identifier subset + XMP metadata scanning added.
+- **Precision hardening (benign-corpus FP rate 78.6% → 0.00%)** — perplexity-based GCG-suffix detection is now opt-in / default off (character statistics cannot separate adversarial suffixes from dense legal formatting); fuzzy matching restricted to longer multi-word phrases; social-engineering urgency+authority pair now also requires an action demand.
+- YARA ruleset 38 → 53 rules with `meta.cve`/`meta.mitre`.
+
+### Fixed
+
+- Built-in YARA ruleset was uncompilable on yara-python ≥ 4.5 (`(?:…)`, `/m`, `($a or $b) in (range)`) — silently disabling YARA. Rewritten to valid syntax.
+
 ## [0.4.0] - 2026-05-10
 
 ### Added

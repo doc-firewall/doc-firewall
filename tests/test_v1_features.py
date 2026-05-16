@@ -194,18 +194,22 @@ class TestV4Features(unittest.TestCase):
     def test_pii_detector(self):
         det = PiiDetector()
         cfg = ScanConfig(enable_pii_checks=True)
-        
+
         # Test case: text with Fake SSN
         text_with_pii = "My SSN is 123-45-6789 and email is test@example.com."
         doc = ParsedDocument("resume.pdf", "pdf", text_with_pii)
-        
+
         findings = det.run(doc, cfg)
         self.assertTrue(len(findings) > 0)
-        # Check that evidence contains SSN match
-        evidence = findings[0].evidence["matches"]
-        types = [m["type"] for m in evidence]
-        self.assertIn("US SSN", types)
-        self.assertIn("Email Address", types)
+        # D.13: evidence["matches"] is now a dict keyed by identifier label.
+        # The threat_id is T8 (was T2 placeholder in v1.0).
+        from doc_firewall.enums import ThreatID
+        self.assertEqual(findings[0].threat_id, ThreatID.T8_METADATA_INJECTION)
+        matches = findings[0].evidence["matches"]
+        self.assertIn("US SSN", matches)
+        self.assertIn("Email Address", matches)
+        # HIPAA Safe-Harbor #7 (SSN) should be tagged
+        self.assertIn(7, findings[0].evidence["hipaa_safe_harbor_hits"])
 
     def test_secrets_detector(self):
         det = SecretsDetector()

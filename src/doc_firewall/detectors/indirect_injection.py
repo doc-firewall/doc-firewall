@@ -12,6 +12,37 @@ _URL_RE = re.compile(r'https?://[^\s\'"<>]{8,}', re.IGNORECASE)
 _UNIX_PATH_RE = re.compile(r'/[a-z_][a-z0-9_-]*/[a-z0-9_./-]{2,}', re.IGNORECASE)
 _WIN_PATH_RE = re.compile(r'[A-Z]:\\[^\s\\]{2,}(?:\\[^\s\\]+)+', re.IGNORECASE)
 
+# D.11: Extended URI vocabulary — non-https schemes attackers use to evade
+# the simple `https?://` check.
+_EXT_URI_RE = re.compile(
+    r'\b(?:'
+    r'data:[a-z]+/[a-z0-9.+-]+(?:;[^,\s]+)?,'         # data: URIs
+    r'|file://[/\\][^\s\'"<>]{2,}'                     # file:// paths
+    r'|smb://[^\s\'"<>]{4,}'                           # SMB
+    r'|ipfs://[A-Za-z0-9]{4,}'                         # IPFS
+    r'|ipns://[A-Za-z0-9]{4,}'                         # IPNS
+    r'|gopher://[^\s\'"<>]{4,}'                        # Gopher
+    r'|dict://[^\s\'"<>]{4,}'                          # Dict
+    r'|ldap://[^\s\'"<>]{4,}'                          # LDAP
+    r'|ftp://[^\s\'"<>]{4,}'                           # FTP
+    r'|sftp://[^\s\'"<>]{4,}'                          # SFTP
+    r')',
+    re.IGNORECASE,
+)
+# UNC paths (Windows / SMB) — \\server\share or \\?\UNC\server\share
+_UNC_PATH_RE = re.compile(
+    r'\\\\(?:\?\\UNC\\)?[A-Za-z0-9_.-]{2,}\\[A-Za-z0-9_.\\$-]{2,}'
+)
+# GitHub / Gist raw — high-confidence staging hosts
+_STAGING_URL_RE = re.compile(
+    r'\b(?:'
+    r'raw\.githubusercontent\.com/[\w.-]+/[\w.-]+/[\w.-]+/[\w./-]+'
+    r'|gist\.githubusercontent\.com/[\w.-]+/[\w.-]+/raw/[\w./-]+'
+    r'|pastebin\.com/raw/[A-Za-z0-9]+'
+    r')',
+    re.IGNORECASE,
+)
+
 # Agent tool-call schemas with external path context
 # Matches XML-style tool_use/tool_call blocks whose content references a URL or file path
 _TOOL_CALL_OPEN_RE = re.compile(
@@ -50,7 +81,8 @@ _WINDOW = 500
 def _find_signal_a(text: str) -> list[tuple[int, int, str]]:
     """Return all (start, end, matched_text) Signal A (external ref) hits."""
     hits: list[tuple[int, int, str]] = []
-    for pattern in (_URL_RE, _UNIX_PATH_RE, _WIN_PATH_RE):
+    for pattern in (_URL_RE, _UNIX_PATH_RE, _WIN_PATH_RE,
+                    _EXT_URI_RE, _UNC_PATH_RE, _STAGING_URL_RE):
         for m in pattern.finditer(text):
             hits.append((m.start(), m.end(), m.group()))
     return hits
@@ -76,6 +108,52 @@ class IndirectInjectionDetector(Detector):
         text = doc.text or ""
         if not text:
             return findings
+
+        # D.11: UNC / SMB paths and staging-URL hosts (raw.githubusercontent,
+        # gist raw, pastebin raw) fire HIGH on their own — no legitimate
+        # document needs a UNC instruction or a raw GitHub URL embedded as a
+        # fetch directive.
+        for label, pattern, subtype, objective in [
+            (
+                "Indirect Injection — SMB / UNC Path Reference",
+                _UNC_PATH_RE,
+                "unc_path",
+                "Multi-hop injection via SMB / UNC share",
+            ),
+            (
+                "Indirect Injection — Staging Host (raw GitHub / Gist / Pastebin)",
+                _STAGING_URL_RE,
+                "staging_host",
+                "Multi-hop injection via known payload-staging service",
+            ),
+        ]:
+            m = pattern.search(text)
+            if m:
+                snippet = text[
+                    max(0, m.start() - 50): min(len(text), m.end() + 200)
+                ].strip()
+                findings.append(Finding(
+                    threat_id=ThreatID.T10_INDIRECT_INJECTION,
+                    severity=Severity.HIGH,
+                    title=label,
+                    explain=(
+                        f"Document contains '{m.group()[:80]}'. This URI class "
+                        "is rarely used in legitimate documents and is a high-"
+                        "signal indicator of a multi-hop injection / payload "
+                        "staging chain."
+                    ),
+                    evidence={
+                        "subtype": subtype,
+                        "external_ref": m.group()[:120],
+                        "snippet": snippet[:200],
+                        "malicious_text": snippet[:250],
+                    },
+                    module=self.name,
+                    confidence=0.85,
+                    mitre_technique="T1071",
+                    attack_objective=objective,
+                ))
+                return findings
 
         # ── Tool-call schema path (HIGH, no proximity requirement) ─────────
         for pattern in (_TOOL_CALL_OPEN_RE, _TOOL_CALL_FUNC_RE):

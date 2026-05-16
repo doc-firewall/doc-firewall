@@ -534,4 +534,12 @@ def convert_with_docling(
             if len(val) > 4 and val in text:  # Limit short string removal to avoid FP
                 text = text.replace(val, "")
 
+        # If Docling succeeded but extracted no text, promote the fallback text so
+        # the deep scan can still run pattern-matching on the document body.
+        # This occurs on simple PDFs where Docling processes the structure but
+        # finds no text objects (content lives in plain PDF string literals that
+        # Docling skips, while _fallback_pdf's regex finds them directly).
+        if not text.strip() and fallback_text.strip():
+            text = fallback_text
+
     return text, meta

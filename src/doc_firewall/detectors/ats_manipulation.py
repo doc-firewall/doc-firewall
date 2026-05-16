@@ -269,6 +269,61 @@ class ATSManipulationDetector(Detector):
                         )
                     )
 
+        # D.17: Per-section frequency check.  A resume that cleanly mentions
+        # "Python" at 5% globally but stuffs it 30\u00d7 into a single hidden table
+        # dilutes below the 8% global threshold.  Split into sections by page
+        # break / heading / large gap and re-run the frequency check at a
+        # higher threshold (12%) so a single poisoned section fires.
+        if text and len(text) > 1500:
+            # Section boundaries: form-feed, double-newline, heading marker
+            sections = re.split(
+                r"(?:\f|\n{2,}|^#{1,6}\s+|<\s*h[1-6]\s*>)",
+                text,
+                flags=re.MULTILINE,
+            )
+            for sec_idx, sec in enumerate(sections):
+                if len(sec) < 800:
+                    continue  # too small to be meaningful
+                sec_tokens = [
+                    t for t in sec.lower().split()
+                    if t.isalpha() and len(t) > 2 and t not in _STOP_WORDS
+                ]
+                if len(sec_tokens) < 30:
+                    continue
+                sec_counter = Counter(sec_tokens)
+                top_token, top_freq = sec_counter.most_common(1)[0]
+                sec_ratio = top_freq / len(sec_tokens)
+                # Higher per-section threshold (12%) avoids FPs on legitimate
+                # short keyword-dense sections (skills lists).  Require 10
+                # absolute occurrences.
+                if sec_ratio > 0.12 and top_freq >= 10:
+                    findings.append(
+                        Finding(
+                            threat_id=ThreatID.T9_ATS_MANIPULATION,
+                            severity=Severity.MEDIUM,
+                            title=f"Per-Section Keyword Stuffing (section #{sec_idx})",
+                            explain=(
+                                f"In section #{sec_idx} of {len(sections)}, "
+                                f"token '{top_token}' appears in {sec_ratio:.0%} "
+                                f"of {len(sec_tokens)} tokens. Per-section "
+                                "concentration of one keyword is a stuffing "
+                                "pattern that the global frequency check dilutes."
+                            ),
+                            evidence={
+                                "subtype": "per_section_stuffing",
+                                "section_index": sec_idx,
+                                "section_count": len(sections),
+                                "token": top_token,
+                                "section_ratio": round(sec_ratio, 3),
+                                "occurrences": top_freq,
+                                "malicious_text": top_token,
+                            },
+                            module=self.name,
+                            confidence=0.78,
+                        )
+                    )
+                    break  # one per-section finding per document
+
         # 3. High Zero Width / Bidi characters (used for hiding ATS keywords)
         ZERO_WIDTH = {"\u200b", "\u200c", "\u200d", "\ufeff"}
         if text:

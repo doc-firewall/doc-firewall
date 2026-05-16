@@ -303,6 +303,137 @@ class EmbeddedPayloadDetector(Detector):
                         )
                     )
 
+            # D.15: Mach-O headers (Apple binaries) — 32/64/fat variants.
+            # Only flag if NOT at offset 0 (a stand-alone Mach-O isn't a doc)
+            # or if the file claims to be a document by extension.
+            _MACHO_MAGICS = [
+                (b"\xCE\xFA\xED\xFE", "Mach-O 32-bit"),
+                (b"\xCF\xFA\xED\xFE", "Mach-O 64-bit"),
+                (b"\xFE\xED\xFA\xCE", "Mach-O 32-bit (BE)"),
+                (b"\xFE\xED\xFA\xCF", "Mach-O 64-bit (BE)"),
+                (b"\xCA\xFE\xBA\xBE", "Mach-O fat binary"),
+            ]
+            doc_ext = file_path.lower().rsplit(".", 1)[-1] if "." in file_path else ""
+            is_doc_ext = doc_ext in {
+                "pdf", "docx", "pptx", "xlsx", "rtf", "html", "htm",
+                "doc", "xls", "ppt", "csv", "odt", "ods", "odp",
+            }
+            for magic, label in _MACHO_MAGICS:
+                idx = data.find(magic)
+                if idx == -1:
+                    continue
+                # Java .class files start with CAFEBABE — exclude when
+                # extension is .class.
+                if magic == b"\xCA\xFE\xBA\xBE" and doc_ext == "class":
+                    continue
+                if idx == 0 and not is_doc_ext:
+                    continue  # Stand-alone Mach-O — not a document
+                findings.append(Finding(
+                    threat_id=ThreatID.T7_EMBEDDED_PAYLOAD,
+                    severity=Severity.HIGH,
+                    title=f"Embedded {label} Binary Detected",
+                    explain=(
+                        f"Found {label} magic bytes at offset {idx} inside a "
+                        "document — embedded macOS executable / dropper."
+                    ),
+                    evidence={
+                        "subtype": "macho_embedded",
+                        "offset": idx,
+                        "label": label,
+                        "malicious_text": label,
+                    },
+                    confidence=0.85,
+                    module="embedded_payload.fast",
+                ))
+                break
+
+            # D.15: WebAssembly module (00 61 73 6D — "\\0asm")
+            wasm_idx = data.find(b"\x00asm")
+            if wasm_idx != -1 and wasm_idx > 0:
+                findings.append(Finding(
+                    threat_id=ThreatID.T7_EMBEDDED_PAYLOAD,
+                    severity=Severity.MEDIUM,
+                    title="Embedded WebAssembly Module",
+                    explain=(
+                        f"Found WebAssembly magic bytes at offset {wasm_idx}. "
+                        "WASM modules can carry complex payloads that execute "
+                        "in browser/runtime contexts."
+                    ),
+                    evidence={
+                        "subtype": "wasm_embedded",
+                        "offset": wasm_idx,
+                        "malicious_text": "WebAssembly module",
+                    },
+                    confidence=0.75,
+                    module="embedded_payload.fast",
+                ))
+
+            # D.15: ISO 9660 filesystem (CD001 at fixed offset 0x8001 in a true
+            # ISO).  When found inside a non-ISO document it indicates an
+            # embedded mountable image (CVE-2023-36884 phishing chain).
+            iso_idx = data.find(b"CD001")
+            if iso_idx != -1 and not file_path.lower().endswith((".iso", ".img")):
+                # Verify it's at an ISO-plausible offset (>= 0x8000 / not text)
+                if iso_idx >= 0x8000:
+                    findings.append(Finding(
+                        threat_id=ThreatID.T7_EMBEDDED_PAYLOAD,
+                        severity=Severity.HIGH,
+                        title="Embedded ISO 9660 Filesystem Image",
+                        explain=(
+                            f"ISO 9660 magic 'CD001' at offset {iso_idx} — "
+                            "embedded mountable disc image. Used in CVE-2023-36884 "
+                            "and follow-on phishing chains to bypass MOTW."
+                        ),
+                        evidence={
+                            "subtype": "iso_embedded",
+                            "offset": iso_idx,
+                            "malicious_text": "ISO 9660 filesystem",
+                        },
+                        confidence=0.85,
+                        module="embedded_payload.fast",
+                        cve="CVE-2023-36884",
+                    ))
+
+            # D.15: RAR archive header (Rar!\x1A\x07)
+            rar_idx = data.find(b"Rar!\x1A\x07")
+            if rar_idx != -1 and not file_path.lower().endswith(".rar"):
+                findings.append(Finding(
+                    threat_id=ThreatID.T7_EMBEDDED_PAYLOAD,
+                    severity=Severity.HIGH,
+                    title="Embedded RAR Archive",
+                    explain=(
+                        f"RAR magic at offset {rar_idx} inside a non-RAR file. "
+                        "Embedded archives are a common dropper carrier."
+                    ),
+                    evidence={
+                        "subtype": "rar_embedded",
+                        "offset": rar_idx,
+                        "malicious_text": "RAR archive",
+                    },
+                    confidence=0.85,
+                    module="embedded_payload.fast",
+                ))
+
+            # D.15: 7z archive header (37 7A BC AF 27 1C)
+            sz_idx = data.find(b"\x37\x7A\xBC\xAF\x27\x1C")
+            if sz_idx != -1 and not file_path.lower().endswith(".7z"):
+                findings.append(Finding(
+                    threat_id=ThreatID.T7_EMBEDDED_PAYLOAD,
+                    severity=Severity.HIGH,
+                    title="Embedded 7z Archive",
+                    explain=(
+                        f"7z magic at offset {sz_idx} inside a non-7z file — "
+                        "embedded archive payload carrier."
+                    ),
+                    evidence={
+                        "subtype": "7z_embedded",
+                        "offset": sz_idx,
+                        "malicious_text": "7z archive",
+                    },
+                    confidence=0.85,
+                    module="embedded_payload.fast",
+                ))
+
             # 4. Appended-data detection (item 0.13)
             # Data after a known end-of-file marker is a steganographic payload carrier.
             TAIL_SIZE = 1024

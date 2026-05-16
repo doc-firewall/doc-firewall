@@ -1,5 +1,5 @@
 site_name: DocFirewall
-site_description: "Open-source Python library for secure document intake. Detects prompt injection, malware, and data exfiltration in PDF, DOCX, PPTX, and XLSX files before they reach your LLM or RAG pipeline."
+site_description: "Open-source Python library for secure document intake. Detects prompt injection, malware, and data exfiltration in PDF, DOCX, PPTX, XLSX, RTF, HTML, legacy Office (.doc/.xls/.ppt), CSV/TSV, and OpenDocument files before they reach your LLM or RAG pipeline."
 site_url: https://www.docfirewall.com/
 repo_url: https://github.com/doc-firewall/doc-firewall
 copyright: "Copyright &copy; 2024–2026 DocFirewall. MIT Licensed."

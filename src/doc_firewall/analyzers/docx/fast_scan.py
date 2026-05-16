@@ -213,6 +213,19 @@ def fast_scan_docx(file_path: str, config: ScanConfig) -> List[Finding]:
                         module="fast_scan.docx.macros",
                     )
                 )
+                # D.1: scan the vbaProject.bin OLE2 container for stomping +
+                # shell APIs.  Imported lazily to keep the dependency optional.
+                if (
+                    z.filename.endswith("vbaProject.bin")
+                    and getattr(config, "enable_legacy_office", True)
+                ):
+                    try:
+                        from ..ole.fast_scan import scan_embedded_vbaproject
+                        findings.extend(
+                            scan_embedded_vbaproject(zf, z.filename, config)
+                        )
+                    except Exception as _vba_e:
+                        logger.debug("vbaProject scan failed: %s", _vba_e)
 
             # Embeddings
             if "word/embeddings/" in z.filename:

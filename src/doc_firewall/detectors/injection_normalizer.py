@@ -24,6 +24,8 @@ from __future__ import annotations
 import re
 import unicodedata
 
+from ..utils.unicode_norm import _MATH_SCRIPT_MAP, _STRIP_TABLE  # D.5/F.5
+
 # ── 1. Zero-width / invisible / BIDI characters ─────────────────────────────
 
 _ZERO_WIDTH_RE = re.compile(
@@ -44,6 +46,8 @@ _HOMOGLYPH_MAP: dict[int, str] = {
     ord("а"): "a",  ord("е"): "e",  ord("о"): "o",  ord("р"): "p",
     ord("с"): "c",  ord("х"): "x",  ord("у"): "y",  ord("і"): "i",
     ord("ё"): "e",  ord("ѕ"): "s",  ord("ј"): "j",  ord("ԁ"): "d",
+    ord("ь"): "b",  ord("ѵ"): "v",  ord("ԛ"): "q",  ord("ԝ"): "w",
+    ord("ӏ"): "i",  ord("ӕ"): "ae",
     # B.11: Cyrillic UPPERCASE homoglyphs — the most commonly abused set.
     # Each maps to its lowercase Latin lookalike (step 5 lowercases everything).
     ord("А"): "a",  # U+0410 ≡ Latin A
@@ -57,22 +61,79 @@ _HOMOGLYPH_MAP: dict[int, str] = {
     ord("Р"): "r",  # U+0420 ≡ Latin R (NB: lowercase р → p, uppercase Р → r)
     ord("Т"): "t",  # U+0422 ≡ Latin T
     ord("Х"): "x",  # U+0425 ≡ Latin X
+    ord("Ѕ"): "s",  # U+0405 ≡ Latin S
+    ord("Ј"): "j",  # U+0408 ≡ Latin J
+    ord("І"): "i",  # U+0406 ≡ Latin I
+    ord("Ү"): "y",  # U+04AE
+    ord("Ԛ"): "q",  # U+051A
+    ord("Ԝ"): "w",  # U+051C
     # Greek lowercase
     ord("α"): "a",  ord("β"): "b",  ord("γ"): "y",  ord("ε"): "e",
     ord("ζ"): "z",  ord("η"): "n",  ord("ι"): "i",  ord("κ"): "k",
     ord("μ"): "u",  ord("ν"): "v",  ord("ο"): "o",  ord("ρ"): "p",
-    ord("τ"): "t",  ord("υ"): "u",  ord("χ"): "x",
-    # Fullwidth ASCII (！ … ～)
-    **{cp: chr(cp - 0xFEE0) for cp in range(0xFF01, 0xFF5F)},
-    # Latin look-alikes and Greek uppercase
-    ord("ı"): "i",  ord("ℓ"): "l",  ord("ℐ"): "i",
+    ord("τ"): "t",  ord("υ"): "u",  ord("χ"): "x",  ord("σ"): "o",
+    ord("ω"): "w",
+    # Greek uppercase
     ord("Α"): "a",  ord("Β"): "b",  ord("Ε"): "e",
     ord("Ζ"): "z",  ord("Η"): "h",  ord("Ι"): "i",  ord("Κ"): "k",
     ord("Μ"): "m",  ord("Ν"): "n",  ord("Ο"): "o",  ord("Ρ"): "p",
     ord("Τ"): "t",  ord("Υ"): "y",  ord("Χ"): "x",
+    ord("Σ"): "e",  ord("Φ"): "o",  ord("Ψ"): "y",
+    # Fullwidth ASCII (！ … ～)
+    **{cp: chr(cp - 0xFEE0) for cp in range(0xFF01, 0xFF5F)},
+    # F.1: Armenian uppercase (skews left of Latin in confusable rank lists)
+    ord("Ա"): "u",  # U+0531 — visually similar to inverted U
+    ord("Ո"): "n",  # U+0548 — looks like Latin N
+    ord("Տ"): "s",  # U+054F
+    # F.1: Cherokee uppercase — frequently used in URL spoofing
+    ord("Ꭺ"): "a",  ord("Ᏼ"): "b",  ord("Ꭼ"): "e",
+    ord("Ꮎ"): "h",  ord("Ꮤ"): "w",  ord("Ꮩ"): "v",  ord("Ꭱ"): "r",
+    ord("Ꮓ"): "z",
+    # F.1: Coptic — close visual match for several Latin letters
+    ord("Ⲁ"): "a",  ord("Ⲃ"): "b",  ord("Ⲉ"): "e",  ord("Ⲏ"): "h",
+    ord("Ⲓ"): "i",  ord("Ⲕ"): "k",  ord("Ⲙ"): "m",  ord("Ⲛ"): "n",
+    ord("Ⲟ"): "o",  ord("Ⲣ"): "p",  ord("Ⲧ"): "t",  ord("Ⲭ"): "x",
+    # F.1: IPA / phonetic latin lookalikes
+    ord("ɑ"): "a",  ord("ɡ"): "g",  ord("ɪ"): "i",  ord("ɴ"): "n",
+    ord("ʀ"): "r",  ord("ʟ"): "l",  ord("ᴀ"): "a",  ord("ᴇ"): "e",
+    ord("ᴏ"): "o",  ord("ᴜ"): "u",
+    # Latin look-alikes
+    ord("ı"): "i",  ord("ℓ"): "l",
+    # F.1: Letterlike Symbols (U+2100+) NOT folded by NFKC
+    ord("ℐ"): "i",  ord("ℑ"): "i",  ord("ℒ"): "l",  ord("ℓ"): "l",
+    ord("ℛ"): "r",  ord("ℜ"): "r",  ord("ℬ"): "b",  ord("ℯ"): "e",
+    ord("ℰ"): "e",  ord("ℱ"): "f",  ord("ℳ"): "m",  ord("ℴ"): "o",
+    ord("ℋ"): "h",  ord("ℌ"): "h",  ord("ℍ"): "h",  ord("ℒ"): "l",
+    ord("ℙ"): "p",  ord("ℚ"): "q",  ord("ℝ"): "r",  ord("ℂ"): "c",
+    ord("ℤ"): "z",
+    # F.1: superscript / subscript letters (some NFKC-folded, some not)
+    ord("ᵃ"): "a",  ord("ᵇ"): "b",  ord("ᶜ"): "c",  ord("ᵈ"): "d",
+    ord("ᵉ"): "e",  ord("ᵍ"): "g",  ord("ʰ"): "h",  ord("ⁱ"): "i",
+    ord("ʲ"): "j",  ord("ᵏ"): "k",  ord("ˡ"): "l",  ord("ᵐ"): "m",
+    ord("ⁿ"): "n",  ord("ᵒ"): "o",  ord("ᵖ"): "p",  ord("ʳ"): "r",
+    ord("ˢ"): "s",  ord("ᵗ"): "t",  ord("ᵘ"): "u",  ord("ᵛ"): "v",
+    ord("ʷ"): "w",  ord("ˣ"): "x",  ord("ʸ"): "y",  ord("ᶻ"): "z",
 }
 
 _HOMOGLYPH_TABLE = str.maketrans(_HOMOGLYPH_MAP)
+
+# F.3: inter-letter separator handling.
+# We use TWO patterns:
+#  (a) Single-char-separated obfuscation: "i-g-n-o-r-e" → "ignore"
+#      Pattern matches \w(sep\w){2,} so only fires on 3+ single-char chains.
+#      Separator is *removed* so the result reaches AC as the contiguous word.
+#  (b) Multi-letter-separated obfuscation: "ignore-all-previous" → "ignore all
+#      previous". Separator between two letters is *replaced with a space* so
+#      the AC dictionary (which stores phrases with spaces) still matches.
+_SEP_SINGLE_COLLAPSE_RE = re.compile(
+    r"(?<!\w)\w(?:[\-_.·•]\w){2,}(?!\w)"
+)
+_SEP_INTERLETTER_RE = re.compile(r"(?<=[A-Za-z])[\-_.·•](?=[A-Za-z])")
+_SEP_STRIP_RE = re.compile(r"[\-_.·•]")
+# F.5: single-char-spacing collapse parallel to B.16 — handles "i g n o r e"
+# style obfuscation that surfaces after ZW chars are converted to spaces.
+_SPACE_SINGLE_COLLAPSE_RE = re.compile(r"(?<!\w)\w(?:[ \t ]\w){2,}(?!\w)")
+_SPACE_STRIP_RE = re.compile(r"[ \t ]")
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
@@ -91,13 +152,60 @@ def normalize_for_matching(text: str) -> str:
     # Step 1 — replace invisible chars with a space so that an attacker who
     # inserts U+200B *between* letters of a word ("ign\u200bore") doesn't
     # accidentally merge two surrounding words when the char is removed.
-    cleaned = _ZERO_WIDTH_RE.sub(" ", text)
+    # Step 0 — F.5: strip tag chars / variation selectors (invisible).
+    cleaned = text.translate(_STRIP_TABLE)
+
+    # Step 1a — F.5: collapse intra-word ZW obfuscation FIRST, before any
+    # bulk ZW replacement. Pattern: 3+ single letters separated by ZW chars
+    # within one word ("i[zw]g[zw]n[zw]o[zw]r[zw]e") → "ignore". This
+    # preserves real word-boundary spaces because the regex requires the
+    # entire run to be word-char + ZW-only, not crossing any real space.
+    _ZW_CLASS = "[​‌‍‎‏﻿‪-‮⁦-⁩]"
+    cleaned = re.sub(
+        rf"(?<!\w)\w(?:{_ZW_CLASS}+\w){{2,}}(?!\w)",
+        lambda m: re.sub(_ZW_CLASS, "", m.group(0)),
+        cleaned,
+    )
+
+    # Step 1b — Any remaining ZW between two word chars → SPACE (handles
+    # attacker-replaced word boundaries like "ignore[zw]all").
+    cleaned = re.sub(rf"(?<=\w){_ZW_CLASS}+(?=\w)", " ", cleaned)
+
+    # Step 1c — ZW elsewhere → remove (adjacent to spaces, punctuation, etc.)
+    cleaned = _ZERO_WIDTH_RE.sub("", cleaned)
+
+    # Step 1b — D.5: fold Mathematical Alphanumeric Symbols (U+1D400+) to
+    # ASCII so bold/italic/script letters reach the Aho-Corasick automaton
+    # as plain ASCII.
+    cleaned = cleaned.translate(_MATH_SCRIPT_MAP)
 
     # Step 2 — homoglyph substitution
     cleaned = cleaned.translate(_HOMOGLYPH_TABLE)
 
-    # Step 3 — NFC normalization (compose canonical equivalents)
-    cleaned = unicodedata.normalize("NFC", cleaned)
+    # Step 3 — NFKC normalization (also folds compatibility forms like
+    # superscript/subscript digits and ligatures to plain ASCII).
+    cleaned = unicodedata.normalize("NFKC", cleaned)
+
+    # Step 3b — F.3a: collapse single-char-separated obfuscation
+    # ("i-g-n-o-r-e" → "ignore") for hyphen/dot/underscore/middle-dot/bullet.
+    cleaned = _SEP_SINGLE_COLLAPSE_RE.sub(
+        lambda m: _SEP_STRIP_RE.sub("", m.group(0)),
+        cleaned,
+    )
+    # Step 3c — F.3b: replace inter-letter separators with a space so
+    # "ignore-all-previous-instructions" matches the AC dictionary phrase
+    # "ignore all previous instructions". This is *after* the single-char
+    # collapse so we don't accidentally re-insert spaces into "ignore".
+    cleaned = _SEP_INTERLETTER_RE.sub(" ", cleaned)
+
+    # Step 3d — F.5: collapse "i g n o r e" style single-char-with-space
+    # obfuscation. Runs of 3+ single chars separated by exactly one space
+    # collapse to the contiguous word. This fires after ZW→space contextual
+    # replacement has produced single-space-separated patterns.
+    cleaned = _SPACE_SINGLE_COLLAPSE_RE.sub(
+        lambda m: _SPACE_STRIP_RE.sub("", m.group(0)),
+        cleaned,
+    )
 
     # Step 4 — collapse whitespace
     cleaned = re.sub(r"[\n\r\t]", " ", cleaned)

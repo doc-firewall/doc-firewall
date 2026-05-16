@@ -6,6 +6,7 @@ from ..analyzers.base import ParsedDocument
 from ..config import ScanConfig
 from ..report import Finding
 from ..enums import ThreatID, Severity
+from ..utils.unicode_norm import normalize_text_with_stats
 
 ZERO_WIDTH = {"\u200b", "\u200c", "\u200d", "\ufeff"}
 BIDI_CONTROLS = {
@@ -113,6 +114,57 @@ class TextObfuscationDetector(Detector):
             page_count = doc.pdf.get("page_count", 1) or 1
             if obj_count / page_count > 1000:  # Heuristic
                 signals.append("high_object_density")
+
+        # D.6: Aggressive normalization is itself a T3 signal — fire even when
+        # the cleaned phrase happens not to match an injection list.  Tag
+        # chars / variation selectors and U+1D400+ math-script characters are
+        # not produced by legitimate document tooling at meaningful ratios.
+        _, norm_stats = normalize_text_with_stats(text)
+        if norm_stats.tag_strip_ratio > 0.05:
+            findings.append(
+                Finding(
+                    threat_id=ThreatID.T3_OBFUSCATION,
+                    severity=Severity.HIGH,
+                    title="Tag / Variation-Selector Character Density",
+                    explain=(
+                        f"{norm_stats.tag_strip_count} invisible tag / variation-"
+                        f"selector characters ({norm_stats.tag_strip_ratio:.1%} of "
+                        "document) — used to encode hidden ASCII payloads invisible "
+                        "to readers but extracted by parsers."
+                    ),
+                    evidence={
+                        "subtype": "tag_strip_ratio",
+                        "ratio": round(norm_stats.tag_strip_ratio, 4),
+                        "count": norm_stats.tag_strip_count,
+                        "malicious_text": "tag/VS chars",
+                    },
+                    confidence=0.90,
+                    module=self.name,
+                )
+            )
+        if norm_stats.math_script_ratio > 0.05:
+            findings.append(
+                Finding(
+                    threat_id=ThreatID.T3_OBFUSCATION,
+                    severity=Severity.MEDIUM,
+                    title="Mathematical / Script Unicode Density",
+                    explain=(
+                        f"{norm_stats.math_script_count} characters from the "
+                        "Mathematical Alphanumeric Symbols block "
+                        f"({norm_stats.math_script_ratio:.1%} of document) — used "
+                        "to spell ASCII words in italic/bold/script that bypass "
+                        "ASCII regex and Aho-Corasick matchers."
+                    ),
+                    evidence={
+                        "subtype": "math_script_ratio",
+                        "ratio": round(norm_stats.math_script_ratio, 4),
+                        "count": norm_stats.math_script_count,
+                        "malicious_text": "math-script chars",
+                    },
+                    confidence=0.85,
+                    module=self.name,
+                )
+            )
 
         # Decision: Trigger T3 only if 2+ signals
         if len(signals) >= 2:

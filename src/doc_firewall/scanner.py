@@ -18,12 +18,18 @@ from .analyzers.pptx.fast_scan import fast_scan_pptx
 from .analyzers.xlsx.fast_scan import fast_scan_xlsx
 from .analyzers.rtf.fast_scan import fast_scan_rtf
 from .analyzers.html.fast_scan import fast_scan_html
+from .analyzers.ole.fast_scan import fast_scan_ole, _CFB_MAGIC
+from .analyzers.csv.fast_scan import fast_scan_csv
+from .analyzers.odf.fast_scan import fast_scan_odf
 from .analyzers.pdf.parser import parse_pdf, ParsedDocument
 from .analyzers.docx.parser import parse_docx
 from .analyzers.pptx.parser import parse_pptx
 from .analyzers.xlsx.parser import parse_xlsx
 from .analyzers.rtf.parser import parse_rtf
 from .analyzers.html.parser import parse_html
+from .analyzers.ole.parser import parse_ole
+from .analyzers.csv.parser import parse_csv
+from .analyzers.odf.parser import parse_odf
 
 # format checks
 from .analyzers.pdf.active_content import detect_pdf_active_content
@@ -54,6 +60,9 @@ from .detectors.ocr_injection import OCRInjectionDetector
 from .detectors.indirect_injection import IndirectInjectionDetector
 from .detectors.rag_poisoning import RAGPoisoningDetector
 from .detectors.social_engineering import SocialEngineeringDetector
+from .detectors.pii import PiiDetector
+from .detectors.injection_perplexity import InjectionPerplexityDetector
+from .detectors.media_metadata import MediaMetadataDetector
 
 from .utils.circuit_breaker import CircuitBreaker, CircuitOpenError
 from .utils.hashing import sha256_file
@@ -68,12 +77,19 @@ _MAGIC_BYTES = {
     b"%PDF": "pdf",
     b"PK\x03\x04": "zip",  # Generic ZIP — probe inner structure to refine
     b"{\\rtf": "rtf",      # RTF documents start with {\rtf
+    # D.2: legacy Office binary formats — all share the CFB header.  The
+    # specific format (.doc / .xls / .ppt) is resolved by inspecting the
+    # OLE stream layout in the analyzer.
+    _CFB_MAGIC: "ole",
 }
 
 _ZIP_INNER_SIGNATURES: list[tuple[str, str]] = [
     ("word/document.xml", "docx"),
     ("ppt/presentation.xml", "pptx"),
     ("xl/workbook.xml", "xlsx"),
+    # E.2: OpenDocument formats — all share the `mimetype` part at archive
+    # offset 0; we probe for the format-specific body file.
+    ("content.xml", "odf"),  # generic ODF — refined by extension if needed
 ]
 
 
@@ -85,20 +101,49 @@ def _detect_file_type_by_magic(path: str) -> str:
             header = f.read(8)
         for magic, ftype in _MAGIC_BYTES.items():
             if header.startswith(magic):
-                if ftype != "zip":
-                    return ftype
-                # ZIP-based: peek inside to differentiate Office formats
-                try:
-                    import zipfile as _zf
+                if ftype == "zip":
+                    # ZIP-based: peek inside to differentiate Office formats
+                    try:
+                        import zipfile as _zf
 
-                    with _zf.ZipFile(path, "r") as zf:
-                        names = set(zf.namelist())
-                    for inner, detected in _ZIP_INNER_SIGNATURES:
-                        if inner in names:
-                            return detected
-                except Exception:
-                    pass
-                return "zip"  # Unknown ZIP format
+                        with _zf.ZipFile(path, "r") as zf:
+                            names = set(zf.namelist())
+                            for inner, detected in _ZIP_INNER_SIGNATURES:
+                                if inner in names:
+                                    # E.2: refine generic "odf" → specific
+                                    # variant via the mimetype file.
+                                    if detected == "odf" and "mimetype" in names:
+                                        try:
+                                            mt = zf.read("mimetype").decode(
+                                                "ascii", errors="replace"
+                                            ).strip()
+                                            if "spreadsheet" in mt:
+                                                return "odf.sheet"
+                                            if "presentation" in mt:
+                                                return "odf.presentation"
+                                            if "text" in mt:
+                                                return "odf.text"
+                                        except Exception:
+                                            pass
+                                        return "odf.text"
+                                    return detected
+                    except Exception:
+                        pass
+                    return "zip"  # Unknown ZIP format
+                if ftype == "ole":
+                    # D.2: distinguish legacy .doc / .xls / .ppt by extension.
+                    # The OLE stream layout could resolve this authoritatively
+                    # but the extension is reliable in practice and avoids a
+                    # second open+parse just for type classification.
+                    ext = path.lower().rsplit(".", 1)[-1] if "." in path else ""
+                    if ext in {"doc", "dot"}:
+                        return "ole.doc"
+                    if ext in {"xls", "xlt"}:
+                        return "ole.xls"
+                    if ext in {"ppt", "pot"}:
+                        return "ole.ppt"
+                    return "ole"
+                return ftype
     except OSError:
         pass
     return "unknown"
@@ -151,7 +196,25 @@ class Scanner:
             IndirectInjectionDetector(),
             RAGPoisoningDetector(),
             SocialEngineeringDetector(),
+            PiiDetector(),
+            InjectionPerplexityDetector(),
+            MediaMetadataDetector(),
         ]
+
+        # G.4: eagerly build expensive per-config detector state (compiled
+        # regex sets, Aho-Corasick automata) at construction time so the
+        # first scan isn't materially slower than steady-state. A failing
+        # prepare() must never block Scanner construction — detectors keep a
+        # lazy fallback in run().
+        for det in self.detectors:
+            try:
+                det.prepare(self.config)
+            except Exception as exc:
+                logger.warning(
+                    "Detector prepare() failed; will lazy-init on first scan",
+                    detector=det.name,
+                    error=str(exc),
+                )
 
         # One circuit breaker per detector — persists across scan() calls so
         # failures accumulate and a consistently-broken detector eventually
@@ -411,6 +474,18 @@ class Scanner:
                     findings.extend(fast_scan_rtf(file_path, self.config))
                 elif ftype == "html" and self.config.enable_html:
                     findings.extend(fast_scan_html(file_path, self.config))
+                elif ftype.startswith("ole") and getattr(
+                    self.config, "enable_legacy_office", True
+                ):
+                    findings.extend(fast_scan_ole(file_path, self.config))
+                elif ftype == "csv" and getattr(
+                    self.config, "enable_csv", True
+                ):
+                    findings.extend(fast_scan_csv(file_path, self.config))
+                elif ftype.startswith("odf.") and getattr(
+                    self.config, "enable_odf", True
+                ):
+                    findings.extend(fast_scan_odf(file_path, self.config))
                 elif ftype == "zip" and self.config.enable_archive_scan:
                     # B.7: Generic ZIP — not an Office format. Unpack and
                     # recursively scan each member. Findings are merged back
@@ -523,6 +598,15 @@ class Scanner:
             or (ftype == "xlsx" and self.config.enable_xlsx)
             or (ftype == "rtf" and self.config.enable_rtf)
             or (ftype == "html" and self.config.enable_html)
+            or (
+                ftype.startswith("ole")
+                and getattr(self.config, "enable_legacy_office", True)
+            )
+            or (ftype == "csv" and getattr(self.config, "enable_csv", True))
+            or (
+                ftype.startswith("odf.")
+                and getattr(self.config, "enable_odf", True)
+            )
         ):
             should_deep_scan = True
 
@@ -552,6 +636,18 @@ class Scanner:
                         return parse_rtf(file_path, self.config)
                     elif ftype == "html" and self.config.enable_html:
                         return parse_html(file_path, self.config)
+                    elif ftype.startswith("ole") and getattr(
+                        self.config, "enable_legacy_office", True
+                    ):
+                        return parse_ole(file_path, self.config)
+                    elif ftype == "csv" and getattr(
+                        self.config, "enable_csv", True
+                    ):
+                        return parse_csv(file_path, self.config)
+                    elif ftype.startswith("odf.") and getattr(
+                        self.config, "enable_odf", True
+                    ):
+                        return parse_odf(file_path, self.config)
                     return ParsedDocument(
                         file_path=file_path, file_type=ftype, text="", metadata={}
                     )

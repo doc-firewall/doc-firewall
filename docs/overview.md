@@ -1,6 +1,6 @@
 ---
 title: Overview — DocFirewall Capabilities & Threat Coverage
-description: Overview of DocFirewall's 9 threat vectors (T1–T9), multi-layered defense architecture, and benchmark performance. Covers prompt injection, malware, obfuscation, and ATS manipulation detection.
+description: Overview of DocFirewall's 12 threat vectors (T1–T12), multi-layered defense architecture, and benchmark performance. Covers prompt injection, malware, obfuscation, indirect injection, RAG poisoning, social engineering, and ATS manipulation detection.
 ---
 
 # DocFirewall
@@ -26,7 +26,7 @@ In the context of DocFirewall, an **embedded payload** refers to hidden executab
 ## Key Capabilities
 
 !!! success "Multi-Layered Defense"
-    DocFirewall implements a defense-in-depth strategy covering 9 distinct threat vectors, including Prompt Injection, Malware, and Resource Exhaustion.
+    DocFirewall implements a defense-in-depth strategy covering 12 distinct threat vectors (T1–T12), including Prompt Injection, Malware, Indirect/Multi-Hop Injection, RAG Poisoning, Social Engineering, and Resource Exhaustion.
 
 <div class="grid cards" markdown>
 

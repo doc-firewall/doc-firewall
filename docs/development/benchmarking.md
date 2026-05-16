@@ -46,7 +46,7 @@ Use the `run_benchmark.sh` script to execute the full evaluation suite:
 ```bash
 # This will:
 # 1. Build the 'doc-firewall' docker image
-# 2. Run validation against 410 T1-T9 test cases
+# 2. Run validation against the T1–T12 threat test corpus
 # 3. Calculate precision/recall metrics
 # 4. Generate a DOCX report
 ./run_benchmark.sh

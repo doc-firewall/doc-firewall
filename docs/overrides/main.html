@@ -7,7 +7,7 @@
   {% if page and page.meta and page.meta.description %}
     {% set _desc = page.meta.description %}
   {% else %}
-    {% set _desc = "DocFirewall is an open-source Python library that scans PDF, DOCX, PPTX, and XLSX files for prompt injection, malware, and data exfiltration — protecting LLMs and RAG pipelines before threats reach your AI." %}
+    {% set _desc = "DocFirewall is an open-source Python library that scans PDF, DOCX, PPTX, XLSX, RTF, HTML, legacy Office, CSV/TSV, and OpenDocument files for prompt injection, malware, and data exfiltration across 12 threat classes — protecting LLMs and RAG pipelines before threats reach your AI." %}
   {% endif %}
 
   {# ── Per-page or global title ── #}
@@ -56,7 +56,7 @@
         "@type": "SoftwareApplication",
         "name": "DocFirewall",
         "url": "https://www.docfirewall.com/",
-        "description": "An open-source Python library that scans PDF, DOCX, PPTX, and XLSX files for prompt injection, malware, and data exfiltration — protecting LLMs and RAG pipelines.",
+        "description": "An open-source Python library that scans PDF, DOCX, PPTX, XLSX, RTF, HTML, legacy Office, CSV/TSV, and OpenDocument files for prompt injection, malware, and data exfiltration across 12 threat classes — protecting LLMs and RAG pipelines.",
         "applicationCategory": "SecurityApplication",
         "applicationSubCategory": "AI Security, Document Security",
         "operatingSystem": "Linux, macOS, Windows",
@@ -82,10 +82,14 @@
           "url": "https://www.docfirewall.com/"
         },
         "featureList": [
-          "Prompt injection detection",
-          "Malware scanning via ClamAV and VirusTotal",
-          "Invisible text and obfuscation detection",
-          "PDF, DOCX, PPTX, XLSX support",
+          "Prompt injection detection (12 threat classes, T1–T12)",
+          "Indirect/multi-hop injection, RAG poisoning, and social-engineering detection",
+          "Evasion-resistant matching: homoglyph, zero-width, math-script, reversed-text, 22 languages",
+          "GCG adversarial-suffix and QR/OCR (quishing) detection",
+          "Malware scanning via ClamAV, VirusTotal, and 53 built-in YARA rules",
+          "VBA-stomping detection in legacy Office files",
+          "HIPAA Safe-Harbor PII detection",
+          "9 formats: PDF, DOCX, PPTX, XLSX, RTF, HTML, legacy Office, CSV/TSV, OpenDocument",
           "100% local processing, zero external API calls",
           "BERT-based ML scanning",
           "Two-stage fast and deep scan architecture",
@@ -155,7 +159,7 @@
               Secure Document Intake <span class="text-gradient">for AI & RAG Pipelines</span>
             </h1>
             <p class="hero-subtitle">
-              Protect your LLMs and RAG systems from prompt injection, malicious payloads, and data exfiltration hidden in PDF, DOCX, PPTX, and XLSX files.
+              Protect your LLMs and RAG systems from prompt injection, malicious payloads, and data exfiltration hidden in PDF, DOCX, PPTX, XLSX, RTF, HTML, legacy Office, CSV, and OpenDocument files — 12 threat classes, fully local.
             </p>
             <div class="hero-cta">
               <a href="{{ base_url }}/getting-started/quickstart/" class="btn btn-primary">
@@ -225,13 +229,13 @@
       <section class="stats-section">
         <div class="stats-container">
           <div class="stat-item">
-            <div class="stat-number">9</div>
-            <div class="stat-label">Threat Vectors</div>
+            <div class="stat-number">12</div>
+            <div class="stat-label">Threat Classes</div>
           </div>
           <div class="stat-divider"></div>
           <div class="stat-item">
-            <div class="stat-number">100%</div>
-            <div class="stat-label">F1 Score</div>
+            <div class="stat-number">9</div>
+            <div class="stat-label">File Formats</div>
           </div>
           <div class="stat-divider"></div>
           <div class="stat-item">
@@ -240,8 +244,8 @@
           </div>
           <div class="stat-divider"></div>
           <div class="stat-item">
-            <div class="stat-number">2</div>
-            <div class="stat-label">Scan Stages</div>
+            <div class="stat-number">0%</div>
+            <div class="stat-label">Benign FP Rate</div>
           </div>
         </div>
       </section>
@@ -278,17 +282,17 @@
               <svg class="feature-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
             </div>
             <h3>LLM-Aware Scanning</h3>
-            <p>Detects prompt injections, invisible text, and semantic manipulation designed to poison RAG systems and hijack LLM context windows.</p>
-            <span class="feature-tag">T4 · T5 · T9</span>
+            <p>12 threat classes (T1–T12): prompt injection, indirect/multi-hop injection, RAG poisoning, and social engineering designed to hijack LLM context windows and corrupt vector stores.</p>
+            <span class="feature-tag">T4 · T10 · T11 · T12</span>
           </div>
 
           <div class="feature-card">
             <div class="feature-icon-wrapper">
               <svg class="feature-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
             </div>
-            <h3>Deep Document Parsing</h3>
-            <p>Powered by Docling, extracts high-fidelity logical representations of PDF, DOCX, PPTX, and XLSX files to uncover threats that bypass standard parsers.</p>
-            <span class="feature-tag">Docling Powered</span>
+            <h3>9 Document Formats</h3>
+            <p>PDF, DOCX, PPTX, XLSX, RTF, HTML, legacy Office (.doc/.xls/.ppt), CSV/TSV, and OpenDocument (.odt/.ods/.odp) — including VBA-stomping, CSV formula injection, and ODF <code>macro://</code> (CVE-2023-2255).</p>
+            <span class="feature-tag">Docling · Legacy OLE · ODF · CSV</span>
           </div>
 
           <div class="feature-card">
@@ -325,6 +329,24 @@
             <h3>Easy Integration</h3>
             <p>Available as a Python library, CLI tool, and Docker container. Drop it into your existing data pipelines with minimal configuration.</p>
             <span class="feature-tag">Python · CLI · Docker</span>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-icon-wrapper">
+              <svg class="feature-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"></path></svg>
+            </div>
+            <h3>Evasion-Resistant Matching</h3>
+            <p>Normalizes Unicode homoglyphs, zero-width &amp; BIDI characters, Mathematical-Alphanumeric and tag-character tricks, reversed text, and separator splitting — plus edit-distance fuzzy matching across 22 languages — before detection runs.</p>
+            <span class="feature-tag">Homoglyph · Zero-Width · 22 Languages</span>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-icon-wrapper">
+              <svg class="feature-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+            </div>
+            <h3>Advanced &amp; Compliance Coverage</h3>
+            <p>Opt-in GCG adversarial-suffix (perplexity) detection, QR/OCR-image quishing decoding, embedded-media metadata scanning, and a HIPAA Safe-Harbor PII identifier subset.</p>
+            <span class="feature-tag">GCG · Quishing · HIPAA PII</span>
           </div>
 
         </div>

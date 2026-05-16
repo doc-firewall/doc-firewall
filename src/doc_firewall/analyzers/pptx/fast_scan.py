@@ -61,6 +61,45 @@ def _check_hidden_pptx(content: bytes, filename: str) -> list[tuple[str, str]]:
     return hits
 
 
+def _detect_slide_master_cycle(zf: zipfile.ZipFile) -> bool:
+    """D.14: detect slide → slideLayout → slideMaster reference cycles.
+
+    PPTX uses .rels files to wire each slide to a layout and each layout to a
+    master.  An attacker who hand-crafts the .rels graph so that
+    slideLayoutN → slideMasterM → slideLayoutN causes infinite recursion in
+    parsers that follow the chain.
+    """
+    graph: dict[str, list[str]] = {}
+    for info in zf.infolist():
+        if not info.filename.endswith(".rels"):
+            continue
+        try:
+            with zf.open(info) as f:
+                content = f.read(64 * 1024)
+        except Exception:
+            continue
+        # Parts live in slides/ ppt/slideLayouts/ ppt/slideMasters/.
+        # Resolve each Target relative to the .rels owner: a/_rels/b.rels
+        # owns the path "a/b" so Target="../slideLayouts/x.xml" resolves to
+        # "ppt/slideLayouts/x.xml" from owner "ppt/slides/slide1.xml".
+        owner_dir = info.filename.replace("_rels/", "").rsplit("/", 1)[0]
+        for tm in re.finditer(rb'Target\s*=\s*"([^"]+)"', content):
+            tgt = tm.group(1).decode("ascii", errors="replace")
+            if "slideLayout" in tgt or "slideMaster" in tgt or "/slide" in tgt:
+                # Normalise relative paths
+                if tgt.startswith("../"):
+                    parent = owner_dir.rsplit("/", 1)[0] if "/" in owner_dir else ""
+                    tgt = parent + "/" + tgt[3:] if parent else tgt[3:]
+                elif not tgt.startswith("/"):
+                    tgt = owner_dir + "/" + tgt
+                owner_path = info.filename.replace("_rels/", "").rsplit(".rels", 1)[0]
+                graph.setdefault(owner_path, []).append(tgt)
+    if not graph:
+        return False
+    from ...utils.graph_cycle import has_cycle
+    return has_cycle(graph)
+
+
 def fast_scan_pptx(file_path: str, config: ScanConfig) -> List[Finding]:
     """Fast structural scan of a PPTX (ZIP-based) file."""
     findings: List[Finding] = []
@@ -70,6 +109,33 @@ def fast_scan_pptx(file_path: str, config: ScanConfig) -> List[Finding]:
 
     with zipfile.ZipFile(file_path, "r") as zf:
         infolist = zf.infolist()
+
+        # D.14: slide-master / layout cycle (DoS).  Walked before per-part
+        # iteration so we can fail fast on a confirmed bomb.
+        if config.enable_dos_checks:
+            try:
+                if _detect_slide_master_cycle(zf):
+                    findings.append(
+                        Finding(
+                            threat_id=ThreatID.T6_DOS,
+                            severity=Severity.HIGH,
+                            title="PPTX Slide Master / Layout Cycle",
+                            explain=(
+                                "Detected a cycle in the PPTX slide → layout → "
+                                "master reference graph (.rels). Cycles cause "
+                                "infinite recursion in parsers that follow the "
+                                "reference chain."
+                            ),
+                            evidence={
+                                "subtype": "slide_master_cycle",
+                                "malicious_text": "PPTX rels cycle",
+                            },
+                            confidence=0.85,
+                            module="fast_scan.pptx.master_cycle",
+                        )
+                    )
+            except Exception:
+                pass
         part_count = len(infolist)
         total_uncompressed = sum(z.file_size for z in infolist)
         total_compressed = sum(z.compress_size for z in infolist)
@@ -178,6 +244,18 @@ def fast_scan_pptx(file_path: str, config: ScanConfig) -> List[Finding]:
                         module="fast_scan.pptx.macros",
                     )
                 )
+                # D.1: scan vbaProject.bin for stomping + shell APIs
+                if (
+                    z.filename.endswith("vbaProject.bin")
+                    and getattr(config, "enable_legacy_office", True)
+                ):
+                    try:
+                        from ..ole.fast_scan import scan_embedded_vbaproject
+                        findings.extend(
+                            scan_embedded_vbaproject(zf, z.filename, config)
+                        )
+                    except Exception as _vba_e:
+                        logger.debug("vbaProject scan failed: %s", _vba_e)
 
             # Embedded objects (OLE/media that might carry payloads)
             if z.filename.startswith("ppt/embeddings/"):

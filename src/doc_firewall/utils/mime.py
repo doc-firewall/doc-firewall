@@ -28,6 +28,23 @@ def guess_file_type(path: str) -> str:
         return "rtf"
     if ext in [".html", ".htm"]:
         return "html"
+    # D.2: legacy OLE Office binary formats
+    if ext in [".doc", ".dot"]:
+        return "ole.doc"
+    if ext in [".xls", ".xlt"]:
+        return "ole.xls"
+    if ext in [".ppt", ".pot"]:
+        return "ole.ppt"
+    # E.1: CSV / TSV
+    if ext in [".csv", ".tsv"]:
+        return "csv"
+    # E.2: OpenDocument formats
+    if ext == ".odt":
+        return "odf.text"
+    if ext == ".ods":
+        return "odf.sheet"
+    if ext == ".odp":
+        return "odf.presentation"
     return "unknown"
 
 

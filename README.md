@@ -13,7 +13,7 @@
 
 > 🔒 **100% Local & Air-gapped (Zero API):** DocFirewall runs completely locally on your infrastructure. **Zero data is ever sent to external APIs or third-party LLMs.** Secure your AI pipeline without compromising data privacy or compliance.
 
-Whether you are using **LangChain**, **LlamaIndex**, **Haystack**, or custom agentic workflows, DocFirewall acts as a zero-trust compliance layer. It performs strict static analysis and heuristic scanning on **PDF**, **DOCX**, **PPTX**, **XLSX**, **RTF**, and **HTML** files to neutralize threats—such as **Prompt Injection**, **LLM Tool-Call Injection**, **Data Exfiltration**, **XXE**, and **Zip Bombs**—**before** they reach your document parsers, vector databases, or inference engines. It provides out-of-the-box protection against vulnerabilities outlined in the **OWASP LLM Top 10** (e.g., LLM01: Prompt Injection).
+Whether you are using **LangChain**, **LlamaIndex**, **Haystack**, or custom agentic workflows, DocFirewall acts as a zero-trust compliance layer. It performs strict static analysis and heuristic scanning on **PDF**, **DOCX**, **PPTX**, **XLSX**, **RTF**, **HTML**, **legacy Office (.doc/.xls/.ppt)**, **CSV/TSV**, and **OpenDocument (.odt/.ods/.odp)** files to neutralize threats—such as **Prompt Injection**, **LLM Tool-Call Injection**, **Data Exfiltration**, **XXE**, and **Zip Bombs**—**before** they reach your document parsers, vector databases, or inference engines. It provides out-of-the-box protection against vulnerabilities outlined in the **OWASP LLM Top 10** (e.g., LLM01: Prompt Injection).
 
 ---
 
@@ -23,15 +23,18 @@ DocFirewall implements a multi-layered defense strategy covering the following t
 
 | ID | Threat Vector | Description |
 | :--- | :--- | :--- |
-| **T1** | **Malware / Virus** | Integrates with ClamAV, VirusTotal, and a built-in YARA ruleset (30+ document-targeting malware families). |
-| **T2** | **Active Content** | Detects executable JavaScript, VBA Macros, OLE objects, PDF Actions, and LLM tool-call injection schemas (OpenAI, Anthropic, HuggingFace, LangChain, and more). |
-| **T3** | **Obfuscation** | Identifies homoglyphs, invisible text, BIDI overrides, and PDF font-substitution attacks via ToUnicode CMap analysis. |
-| **T4** | **Prompt Injection** | 5-layer detection pipeline (normalization → Aho-Corasick → regex → BERT → semantic NN) with 10-language coverage: English, German, French, Spanish, Italian, Portuguese, Russian, Dutch, Polish, Chinese, Japanese, Korean, Arabic. |
+| **T1** | **Malware / Virus** | Integrates with ClamAV, VirusTotal, and a built-in YARA ruleset (53 document-targeting rules: malware families, CVEs, polyglots). Detects VBA stomping (P-code-only macros) in legacy OLE files. |
+| **T2** | **Active Content** | Detects executable JavaScript, VBA Macros, OLE objects, PDF Actions (`/JBIG2Decode` CVE-2021-30860, `/RichMedia`, `/3D`, `/GoToE`), CSV/spreadsheet formula injection (`=WEBSERVICE`, DDE), ODF `macro://` (CVE-2023-2255), and LLM tool-call injection schemas (OpenAI, Anthropic, HuggingFace, LangChain, and more). |
+| **T3** | **Obfuscation** | Identifies homoglyphs, invisible text, BIDI overrides, Mathematical-Alphanumeric / tag-character / zero-width evasion, reversed text, and PDF font-substitution / `/ActualText` overlay attacks. |
+| **T4** | **Prompt Injection** | 5-layer pipeline (normalization → Aho-Corasick → fuzzy edit-distance → BERT → semantic NN) with 22-language coverage, plus opt-in GCG adversarial-suffix (perplexity) and QR/OCR-image (quishing) detection. |
 | **T5** | **Ranking Manipulation** | Detects keyword stuffing and statistical anomalies to artificially boost RAG retrieval ranking. |
-| **T6** | **Resource Exhaustion** | Prevents DoS attacks via Zip bombs, excessive page counts, per-stage timeouts, and file-size hard limits. |
-| **T7** | **Embedded Payloads** | Scans for embedded binaries (PE, ELF), malicious object streams, and steganographic payloads via LSB analysis and PDF whitespace injection detection. |
-| **T8** | **Metadata Injection** | Detects buffer overflows, syntax injection, and high-entropy steganographic carriers in EXIF/XMP metadata fields. |
-| **T9** | **ATS Manipulation** | Detects SEO poisoning, white-on-white text, and off-page positioning used to game applicant tracking systems. |
+| **T6** | **Resource Exhaustion** | Prevents DoS attacks via Zip bombs, excessive page counts, per-stage timeouts, file-size hard limits, and page-tree / slide-master reference cycles. |
+| **T7** | **Embedded Payloads** | Scans for embedded binaries (PE, ELF, Mach-O, WASM, ISO, RAR, 7z), malicious object streams, and steganographic payloads via LSB analysis and PDF whitespace injection detection. |
+| **T8** | **Metadata / PII** | Detects buffer overflows, syntax injection, high-entropy steganographic carriers in EXIF/XMP, embedded-media metadata (ID3/MP4/RIFF), and a HIPAA Safe-Harbor PII identifier subset. |
+| **T9** | **ATS Manipulation** | Detects SEO poisoning, white-on-white text, off-page positioning, and per-section keyword anomalies used to game applicant tracking systems. |
+| **T10** | **Indirect / Multi-Hop Injection** | Detects external-reference + fetch-instruction co-occurrence and agent tool-call schemas pointing at remote payloads (`data:`/`smb:`/UNC/raw-GitHub URIs). |
+| **T11** | **RAG / KB Poisoning** | Authority-assertion patterns, sentence-duplication flooding, false-citation and chunk-boundary split injection targeting vector stores. |
+| **T12** | **Social Engineering** | Tri-signal urgency/authority/action-demand co-occurrence with HIGH overrides for credential harvesting, fake legal threats, and crypto / gift-card / tech-support scams. |
 
 ---
 
@@ -41,7 +44,7 @@ DocFirewall employs a **dual-stage scanning architecture**:
 1. **Fast Scan** — byte-level analysis of raw binary content, < 20 ms, no parsing required.
 2. **Deep Scan** — full document parsing (powered by [Docling](https://github.com/DS4SD/docling)) with semantic analysis, ML inference, and steganography checks.
 
-**Supported Formats**: PDF · DOCX · PPTX · XLSX · RTF · HTML
+**Supported Formats**: PDF · DOCX · PPTX · XLSX · RTF · HTML · DOC/XLS/PPT (legacy OLE) · CSV/TSV · ODT/ODS/ODP (OpenDocument) · ZIP/TAR (recursive)
 
 **Security Benchmarks:**
 
@@ -51,10 +54,11 @@ DocFirewall employs a **dual-stage scanning architecture**:
 | Recall (OWASP LLM01 injection suite) | **≥ 93%** with ML enabled |
 | Aho-Corasick phase matching | O(n), < 1 ms |
 | Deep NLP (BERT, balanced profile) | ~51 ms avg, CPU |
-| Languages covered (injection detection) | 13 (EN, DE, FR, ES, IT, PT, RU, NL, PL, ZH, JA, KO, AR) |
-| Built-in YARA rules | 30+ document-targeting malware families |
+| Languages covered (injection detection) | 22 (EN, DE, FR, ES, IT, PT, RU, NL, PL, ZH, JA, KO, AR, and more) |
+| Built-in YARA rules | 53 document-targeting rules (malware families, CVEs, polyglots) |
+| Benign false-positive rate (220-doc corpus) | **0.00%** (balanced and strict profiles) |
 
-*(Validated on v3 Holdout Dataset: 70+ adversarial samples and 100+ clean benign baseline files. Metrics are reproducible via `test_advanced_ml_metrics.py`.)*
+*(Validated on the 220-document benign corpus (SHA-256 pinned, CI-gated) plus the v3 Holdout adversarial set. Metrics are reproducible via `test_advanced_ml_metrics.py` and `test_benign_corpus_200.py`.)*
 
 ---
 
@@ -227,7 +231,7 @@ config = ScanConfig(
     enable_xlsx=True, enable_rtf=True, enable_html=True,
 
     # ── Advanced NLP / ML Detectors (opt-in for maximum speed by default) ───
-    enable_advanced_ahocorasick=True,   # O(n) phrase matching — 13 languages + tool schemas
+    enable_advanced_ahocorasick=True,   # O(n) phrase matching — 22 languages + tool schemas
     enable_advanced_bert=True,          # Local DeBERTa zero-day injection classifier
     enable_advanced_tfidf=True,         # TF-IDF keyword-stuffing drift detector
     enable_credential_entropy=True,     # Shannon entropy secret/API-key detector

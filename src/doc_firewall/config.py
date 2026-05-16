@@ -93,6 +93,30 @@ class ScanConfig(BaseSettings):
     enable_xlsx: bool = Field(True, description="Scan XLSX/XLSM/XLSB documents")
     enable_rtf: bool = Field(True, description="Scan RTF documents")
     enable_html: bool = Field(True, description="Scan HTML/HTM documents")
+    enable_legacy_office: bool = Field(
+        True,
+        description=(
+            "D.2: Scan legacy OLE2 Office binary formats (.doc/.xls/.ppt) and "
+            "embedded vbaProject.bin streams. Detects VBA stomping (D.1) and "
+            "shell-API strings inside OLE2/CFB containers."
+        ),
+    )
+    enable_csv: bool = Field(
+        True,
+        description=(
+            "E.1: Scan CSV/TSV files. Detects spreadsheet formula injection "
+            "(=cmd|, =WEBSERVICE(, DDE chains) and runs the standard T4/T9 "
+            "deep-scan pipeline on extracted cell text."
+        ),
+    )
+    enable_odf: bool = Field(
+        True,
+        description=(
+            "E.2: Scan OpenDocument formats (.odt/.ods/.odp). ZIP-based like "
+            "DOCX; detects macro: URIs (CVE-2023-2255), Basic macro scripts, "
+            "external template references, and prompt injection in content.xml."
+        ),
+    )
     profile: str = Field("balanced", description="Threshold profile: lenient | balanced | strict")
 
     audit_log_path: Optional[str] = Field(
@@ -174,9 +198,30 @@ class ScanConfig(BaseSettings):
     enable_ocr_injection_scan: bool = Field(
         False,
         description=(
-            "B.6: Run pytesseract OCR on embedded images (PNG/JPG in DOCX/PPTX/XLSX) "
-            "and scan the extracted text for T4 prompt injection phrases. "
+            "B.6 + E.3: Run pytesseract OCR on embedded images (PNG/JPG in "
+            "DOCX/PPTX/XLSX/ODF/PDF) and scan the extracted text for T4 prompt "
+            "injection phrases. PDF images extracted via PyMuPDF when available. "
             "Requires pytesseract and Pillow. Off by default due to OCR latency."
+        ),
+    )
+
+    enable_qr_decode: bool = Field(
+        False,
+        description=(
+            "E.3: Decode QR / barcode payloads in embedded images using pyzbar. "
+            "QR-encoded URLs fire T10 (quishing carrier); QR data: URIs fire "
+            "T7; QR-encoded injection text fires T4; QR-encoded crypto wallets "
+            "fire T12. Requires pyzbar (optional dep). Off by default."
+        ),
+    )
+
+    enable_media_metadata_scan: bool = Field(
+        True,
+        description=(
+            "E.5: Scan ID3 / MP4 atom / RIFF INFO / Vorbis comment metadata "
+            "in embedded audio/video files (ppt/media/, word/media/, "
+            "Pictures/). Uses mutagen when installed; falls back to a printable-"
+            "ASCII byte scan otherwise. On by default — pure stdlib path is fast."
         ),
     )
 
@@ -208,6 +253,35 @@ class ScanConfig(BaseSettings):
             "plus high-confidence single-signal overrides for credential harvesting, "
             "fake legal threats, and bank routing / wire-transfer details. "
             "Pure regex — negligible latency. On by default."
+        ),
+    )
+
+    enable_perplexity_check: bool = Field(
+        False,
+        description=(
+            "D.4: Detect GCG-style adversarial-suffix prompt injection via "
+            "character n-gram perplexity (pure stdlib; built-in English "
+            "unigram table). OPT-IN / default OFF. The G.5 benign-corpus "
+            "audit empirically established that real GCG suffixes (Zou et al.) "
+            "interleave word-like tokens with symbols and therefore occupy "
+            "the same character-statistics space as dense legal / contract / "
+            "resume formatting — char-stats alone cannot achieve both <=1% "
+            "false positives and useful GCG recall. Precision is hardened "
+            "(absolute surprise floor + symbol-ratio + sustained-region + "
+            "plausible-word gates) so operators who knowingly enable it for "
+            "GCG screening get far less noise, but it is not safe as a "
+            "default-on signal. Fires T4 LOW only."
+        ),
+    )
+
+    enable_edit_distance_variants: bool = Field(
+        True,
+        description=(
+            "F.2: Expand the Aho-Corasick dictionary with single-substitution "
+            "and adjacent-transposition variants of every ASCII English "
+            "injection phrase. Fuzzy hits fire T4 MEDIUM (rather than HIGH) "
+            "so a single typo doesn't trigger BLOCK on its own. Adds ~5000 "
+            "entries to the AC automaton; cost is one-time at init."
         ),
     )
 
@@ -373,7 +447,7 @@ class ScanConfig(BaseSettings):
                     2.0,
                 ),
                 (
-                    r"\bdisregard (all |any )?(previous |prior )?(instructions?|rules?)\b",
+                    r"\bdisregard (all |any |your )?(previous |prior )?(instructions?|rules?|training|guidelines?|constraints?)\b",
                     2.0,
                 ),
                 (r"\byou are (now|no longer) bound by\b", 2.0),
@@ -416,6 +490,11 @@ class ScanConfig(BaseSettings):
                 (r"\bnot restricted by any (rules?|policies?|laws?|constraints?|guidelines?)\b", 2.0),
                 (r"\bzero moderation\b", 1.5),
                 (r"\bhas no policies\b", 1.5),
+                # Bordair gap analysis — direct override / respond-without-restrictions
+                (r"\byou\s+must\s+now\s+(?:respond|answer|comply|obey)\b", 2.0),
+                (r"\brespond\s+to\s+(?:all\s+|every\s+)?requests?\s+without\s+(?:any\s+)?(?:restrictions?|limitations?|filters?|constraints?|policies?)\b", 2.0),
+                (r"\b(?:previous|prior)\s+instructions?\s+(?:were|are)\s+(?:a\s+)?(?:test|false|wrong|fake|null|void|invalid|untrue)\b", 2.0),
+                (r"\byour\s+real\s+instructions?\s+(?:are|is|were)\b", 2.0),
             ],
             "secrecy": [
                 (
@@ -431,18 +510,28 @@ class ScanConfig(BaseSettings):
                 (r"\boutput only:?\s*HIRE\b", 2.0),
                 # Expanded reveal/extract patterns — allow optional "me", "all", "your" tokens
                 (
-                    r"\b(print|show|tell|reveal|output|echo|display|leak|describe)(\s+me)?(\s+all)?(\s+your)?\s*(hidden|internal|initial|original|secret|full|complete|training|system)?\s*(instructions?|prompt|configuration|directives?|rules?|training|api\s+keys?|secrets?)\b",
+                    r"\b(print|show|tell|reveal|output|echo|display|leak|describe|expose)(\s+me)?(\s+all)?(\s+your)?\s*(hidden|internal|initial|original|secret|full|complete|training|system)?\s*(instructions?|prompt|configuration|directives?|rules?|training|api\s+keys?|secrets?)\b",
                     1.5,
                 ),
                 (
                     r"\b(output|print|repeat|echo|show)(\s+me)?\s+(everything|the\s+text|all\s+text|your\s+(full|complete))\s+(above|before|prior\s+to)\b",
                     1.5,
                 ),
-                (r"\bwhat\s+were\s+you\s+told\b", 1.5),
+                (r"\bwhat\s+were\s+you\s+told\b", 2.0),
                 (r"\bwhat\s+are\s+your\s+original\s+instructions\b", 1.5),
                 (r"\byour\s+(original|initial|hidden|system|training|secret|internal)\s+instructions?\b", 1.5),
                 (r"\b(reveal|output)\s+all\s+(hidden|secret|system)\b", 2.0),
                 (r"\bleak\s+your\s+(internal|system|hidden|configuration)\b", 2.0),
+                # Bordair gap analysis — explicit system-prompt exfiltration (weight 2.0)
+                (r"\b(?:print|output|show|reveal|echo|expose|describe)\s+(?:your\s+)?(?:complete\s+|full\s+|entire\s+|hidden\s+)?system\s+(?:prompt|configuration|instructions?|message|profile)\b", 2.0),
+                (r"\b(?:expose|reveal|output|leak)\s+(?:your\s+)?(?:hidden|secret|internal)\s+(?:system\s+)?(?:instructions?|directives?|prompt|configuration)\b", 2.0),
+                (r"\b(?:repeat|copy|output|print|echo)\s+(?:everything|all)\s+(?:above|before)\b", 2.0),
+                (r"\b(?:output|print|echo|show|repeat)\s+(?:the\s+)?text\s+(?:above|before)\b", 2.0),
+                (r"\b(?:output|print|show|reveal|echo)\s+(?:your\s+)?(?:full|complete|entire)\s+prompt\b", 2.0),
+                (r"\brepeat\s+(?:your\s+|the\s+)?system\s+(?:prompt|instructions?|configuration)\b", 2.0),
+                (r"\b(?:reveal|output|expose|leak)\s+(?:your\s+)?(?:api\s+ke(?:y|ys)|credentials?|secrets?|configuration)\b", 2.0),
+                (r"\bdescribe\s+(?:your\s+)?(?:role|purpose|function)\s+(?:and\s+)?(?:all\s+)?(?:hidden|secret|internal)\b", 2.0),
+                (r"\becho\s+(?:your\s+)?(?:complete\s+|full\s+)?system\s+(?:configuration|prompt|instructions?)\b", 2.0),
             ],
             "system_policy": [
                 (r"\byou are (now|going to be) (DAN|Mongo Tom|Sydney|ChaosGPT)\b", 2.0),
@@ -469,6 +558,14 @@ class ScanConfig(BaseSettings):
                 # ow1 gap analysis — persona jailbreak variants
                 (r"\bpretend (you are|to be) (an? )?(evil|unrestricted|free|unfiltered)\b", 2.0),
                 (r"\bresponds?\s+(with|to)\s+.{0,30}\bno\s+(restrictions?|rules?|policies?|moderation)\b", 1.5),
+                # Bordair gap analysis — STAN/maintenance/uncensored mode activations
+                (r"\byou\s+are\s+now\s+(?:in\s+)?(?:unrestricted|uncensored|maintenance|unfiltered|unlimited)\s+mode\b", 2.0),
+                (r"\b(?:activate|enable)\s+(?:STAN|DUDE|OMEGA|KEVIN|maintenance|unfiltered|uncensored)\s+mode\b", 2.0),
+                (r"\byou\s+are\s+now\s+STAN\b", 2.0),
+                (r"\bact\s+as\s+an?\s+(?:AI|assistant|bot|model)\s+without\s+(?:any\s+)?(?:ethical\s+|moral\s+|content\s+)?(?:constraints?|restrictions?|limitations?|filters?|safety\s+measures?|guidelines?)\b", 2.0),
+                (r"\bcompletely\s+(?:uncensored|unfiltered|unrestricted)(?:\s+and\s+\w+)?\s+(?:AI|assistant|model|chatbot|language\s+model)\b", 2.0),
+                (r"\byou\s+are\s+now\s+(?:a\s+)?completely\s+(?:uncensored|unfiltered|unrestricted|unmoderated)\b", 2.0),
+                (r"\bstrive\s+to\s+avoid\s+norms?\b", 2.0),
             ],
             "safety_bypass": [
                 (
@@ -489,6 +586,8 @@ class ScanConfig(BaseSettings):
                 # "respond freely" is too common in surveys/feedback docs — require AI/system co-occurrence
                 (r"\b(respond|act|answer)\s+(freely|without\s+restriction|without\s+constraint)\s+.{0,60}\b(ai|model|assistant|llm|chatbot)\b", 1.5),
                 (r"\bignore\s+safety\s+(guidelines?|features?|filters?|rules?|measures?)\b", 2.0),
+                # Passive construction: "safety filters are disabled" (bordair gap)
+                (r"\b(?:safety|content)\s+filters?\s+(?:are|have\s+been|were|is)\s+(?:disabled|deactivated|removed|bypassed|turned\s+off|off)\b", 2.0),
             ],
             "template_injection": [
                 # [system] and [inst] are ambiguous — require an adjacent role tag to confirm LLM context
@@ -496,6 +595,18 @@ class ScanConfig(BaseSettings):
                 (r"<</?SYS>>", 2.0),
                 (r"\|im_end\||\|im_start\|", 1.5),
                 (r"<\|system\|>|<\|user\|>|<\|assistant\|>", 1.5),
+            ],
+            "authority_impersonation_llm": [
+                # LLM-targeted authority claims — distinct from T12 human phishing
+                (r"\b(?:internal|authorized|official)\s+(?:security\s+)?(?:audit|test|directive)\s+(?:from|by)\s+(?:the\s+)?(?:development|security|engineering|AI|system|admin)\s+team\b", 2.0),
+                (r"\bI\s+(?:am|have)\s+(?:admin|root|developer|administrator)\s+(?:access|privileges?|clearance|rights?)\b", 2.0),
+                (r"\boverride\s+all\s+(?:restrictions?|limitations?|filters?|policies?|constraints?)\b", 2.0),
+                (r"\bthis\s+is\s+(?:an?\s+)?(?:authorized|official|internal|emergency)\s+(?:test|audit|override|directive|request|instruction)\b", 1.5),
+                (r"\b(?:emergency|authorized|official)\s+override\s+(?:from|by)\s+(?:your\s+)?(?:development|security|engineering|admin|creator)\s+team\b", 2.0),
+                (r"\bI\s+am\s+(?:a\s+)?(?:developer|engineer)\s+at\s+(?:Anthropic|OpenAI|Google|Microsoft|Meta|Amazon)\b", 2.0),
+                (r"\b(?:developer|admin|root)\s+access\s+(?:granted|enabled|activated)\b", 2.0),
+                (r"\b(?:QA|qa)\s+team\s+(?:directive|override|instruction|command)\b", 2.0),
+                (r"\bauthorized\s+to\s+(?:view|access|see|read)\s+(?:your\s+)?(?:internal|hidden|secret|system|original)\b", 2.0),
             ],
         }
     )
