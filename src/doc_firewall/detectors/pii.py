@@ -7,19 +7,82 @@ from ..config import ScanConfig
 from ..report import Finding
 from ..enums import ThreatID, Severity
 
-# Basic patterns for common PII
-# Note: These are heuristic and not exhaustive.
-# Enterprise usage often requires library specific PII tools (like Presidio).
-PATTERNS = [
-    (r"\b[A-Za-z0-9._%+-]+@(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}\b", "Email Address"),
-    (r"\b\d{3}-\d{2}-\d{4}\b", "US SSN"),
-    (r"\b(?:\+?1[-. ]?)?\(?\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}\b", "Phone Number (US)"),
+# D.13: HIPAA Safe Harbor (45 CFR §164.514(b)(2)) defines 18 identifier types.
+# We cover the regex-detectable subset; free-text identifiers (full name,
+# geographic subdivisions smaller than state) are intentionally out of scope —
+# detecting those without a NER model produces too many false positives.
+#
+# Each entry: (pattern, label, severity, hipaa_safe_harbor_index_or_None)
+_PII_PATTERNS: list[tuple[str, str, Severity, int | None]] = [
+    # 1. Names (skipped — needs NER)
+    # 2. Geographic subdivisions (skipped — needs gazetteer)
+    # 3. Dates directly related to an individual — birth/admission/discharge.
+    #    We match dates in `(Born|DOB|Birth\s*Date|Admission|Discharge):` forms.
+    (
+        r"\b(?:dob|date\s+of\s+birth|born|birthdate|admission\s+date|"
+        r"discharge\s+date)[:\s]{1,4}"
+        r"(?:\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}|"
+        r"(?:january|february|march|april|may|june|july|august|"
+        r"september|october|november|december)\s+\d{1,2},?\s+\d{4})",
+        "HIPAA Date Identifier",
+        Severity.HIGH,
+        3,
+    ),
+    # 4. Phone numbers
+    (
+        r"\b(?:\+?1[-. ]?)?\(?\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}\b",
+        "Phone Number",
+        Severity.LOW,
+        4,
+    ),
+    # 5. Fax numbers — labelled
+    (r"\bfax[:\s]{1,4}(?:\+?1[-. ]?)?\(?\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}\b",
+     "Fax Number", Severity.LOW, 5),
+    # 6. Email addresses
+    (r"\b[A-Za-z0-9._%+-]+@(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}\b",
+     "Email Address", Severity.LOW, 6),
+    # 7. Social Security Number (US)
+    (r"\b(?!000|666|9\d{2})\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b",
+     "US SSN", Severity.HIGH, 7),
+    # 8. Medical Record Number — labelled MRN: nnnn
+    (r"\b(?:mrn|medical\s+record\s+(?:number|no|#))[:\s#]{1,4}[A-Z0-9-]{5,}\b",
+     "Medical Record Number", Severity.HIGH, 8),
+    # 9. Health plan beneficiary number — labelled
+    (r"\b(?:health\s+plan|hpid|member\s+id|policy\s+(?:number|no|#))[:\s#]{1,4}[A-Z0-9-]{6,}\b",
+     "Health Plan Beneficiary Number", Severity.HIGH, 9),
+    # 10. Account numbers — generic (covered by labelled bank/account checks elsewhere)
+    (r"\b(?:account\s+(?:number|no|#))[:\s#]{1,4}\d{8,17}\b",
+     "Account Number", Severity.MEDIUM, 10),
+    # 11. Certificate / license numbers
+    (r"\b(?:license\s+(?:number|no|#)|driver'?s?\s+license)[:\s#]{1,4}[A-Z0-9-]{5,}\b",
+     "License Number", Severity.MEDIUM, 11),
+    # 12. Vehicle identifiers — VIN
+    (r"\b(?<![A-Z0-9])[A-HJ-NPR-Z0-9]{17}(?![A-Z0-9])\b",
+     "Vehicle Identification Number (VIN)", Severity.LOW, 12),
+    # 13. Device identifiers — serial number labelled
+    (r"\b(?:serial\s+(?:number|no|#)|s/n)[:\s#]{1,4}[A-Z0-9-]{6,}\b",
+     "Device Serial Number", Severity.LOW, 13),
+    # 14. Web URLs (LOW — present in many legitimate docs; promoted only if
+    #     co-located with a person name in the future).
+    # 15. IP addresses
+    (r"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d?\d)\b",
+     "IPv4 Address", Severity.LOW, 15),
+    # 16. Biometric identifiers (skipped — binary)
+    # 17. Full-face photographs (skipped — image)
+    # 18. Any other unique identifier — covered by Account Number / SSN above.
+
+    # Non-HIPAA but high-value PII: payment cards
     (
         r"\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|"
         r"3(?:0[0-5]|[68][0-9])[0-9]{11}|6(?:011|5[0-9]{2})[0-9]{12}|"
         r"(?:2131|1800|35\d{3})\d{11})\b",
         "Credit Card Number",
+        Severity.HIGH,
+        None,
     ),
+    # IBAN — international bank account
+    (r"\b[A-Z]{2}\d{2}[A-Z0-9]{4,30}\b",
+     "IBAN", Severity.HIGH, None),
 ]
 
 
@@ -27,56 +90,85 @@ class PiiDetector(Detector):
     name = "pii"
 
     def __init__(self) -> None:
-        self.regexes = [(re.compile(p), name) for p, name in PATTERNS]
+        # Compile patterns once; case-insensitive for label-prefixed forms.
+        self.regexes = [
+            (re.compile(p, re.IGNORECASE), label, sev, hipaa_idx)
+            for p, label, sev, hipaa_idx in _PII_PATTERNS
+        ]
 
     def run(self, doc: ParsedDocument, config: ScanConfig) -> List[Finding]:
         if not config.enable_pii_checks:
             return []
 
+        # Build the text pool: body + selected metadata + XMP packet (D.13).
         text = doc.text or ""
-        # Limiting PII check to first 100k chars for performance if needed,
-        # but PII can be anywhere. Assume full text for now.
+        if doc.metadata:
+            for key in ("title", "subject", "description", "keywords", "comments"):
+                v = doc.metadata.get(key)
+                if isinstance(v, str):
+                    text = text + "\n" + v
+                elif isinstance(v, list):
+                    text = text + "\n" + "\n".join(str(x) for x in v if x)
 
-        matches = []
-        for regex, label in self.regexes:
-            # finditer to get counts without storing all matches if too many
-            count = 0
-            examples = []
-            for m in regex.finditer(text):
-                count += 1
-                if count <= 3:  # Capture first 3 examples
-                    examples.append(m.group(0))
+            # XMP packet — PDFs embed XMP RDF inside <?xpacket?> markers.  Some
+            # parsers expose the raw packet under metadata['xmp'] or similar.
+            for xmp_key in ("xmp", "xmp_packet", "xmp_metadata"):
+                xmp_val = doc.metadata.get(xmp_key)
+                if isinstance(xmp_val, str):
+                    text = text + "\n" + xmp_val
 
-            if count > 0:
-                matches.append({"type": label, "count": count, "examples": examples})
-
-        if not matches:
+        if not text:
             return []
 
-        # Severity depends on what was found. SSN/CC is HIGH.
-        # Email/Phone is LOW/INFO (often expected in resumes).
-        severity = Severity.INFO
-        for m in matches:
-            if m["type"] in ["US SSN", "Credit Card Number"]:
-                severity = Severity.HIGH
-                break
-            if m["type"] in ["Email Address", "Phone Number"]:
-                # If we have a resume scanner, finding an email is expected, so
-                # maybe just INFO or LOW.
-                # But if we find 100 emails, it might be a leak.
-                if m["count"] > 10:
-                    severity = Severity.MEDIUM
+        matches_by_label: dict[str, dict] = {}
+        worst_severity = Severity.INFO
+        sev_rank = {
+            Severity.INFO: 0, Severity.LOW: 1, Severity.MEDIUM: 2,
+            Severity.HIGH: 3, Severity.CRITICAL: 4,
+        }
+        hipaa_hits: set[int] = set()
 
-        # Mapping to a ThreatID. We might need a new T-ID for Privacy.
-        # For now, let's map to a generic warning or T2_ACTIVE_CONTENT as placeholder
+        for regex, label, sev, hipaa_idx in self.regexes:
+            count = 0
+            examples: list[str] = []
+            for m in regex.finditer(text):
+                count += 1
+                if count <= 3:
+                    examples.append(m.group(0))
+            if count == 0:
+                continue
+            matches_by_label[label] = {"count": count, "examples": examples}
+            if hipaa_idx is not None:
+                hipaa_hits.add(hipaa_idx)
+            # Promote LOW → MEDIUM for high-volume occurrences (potential leak)
+            effective_sev = sev
+            if sev == Severity.LOW and count > 10:
+                effective_sev = Severity.MEDIUM
+            if sev_rank[effective_sev] > sev_rank[worst_severity]:
+                worst_severity = effective_sev
 
+        if not matches_by_label:
+            return []
+
+        # D.13: emit T8 (correct mapping) — was T2 placeholder in v1.0.
         return [
             Finding(
-                threat_id=ThreatID.T2_ACTIVE_CONTENT,  # Placeholder: ideally T_PRIVACY
-                severity=severity,
+                threat_id=ThreatID.T8_METADATA_INJECTION,
+                severity=worst_severity,
                 title="Personally Identifiable Information (PII) Detected",
-                explain="The document contains patterns resembling PII.",
-                evidence={"matches": matches, "malicious_text": str(matches)[:250]},
-                module="detectors.pii",
+                explain=(
+                    f"Document contains {sum(m['count'] for m in matches_by_label.values())} "
+                    f"PII match(es) across {len(matches_by_label)} identifier "
+                    f"type(s). HIPAA Safe-Harbor identifiers hit: "
+                    f"{sorted(hipaa_hits) or 'none'}."
+                ),
+                evidence={
+                    "subtype": "pii_exposure",
+                    "matches": matches_by_label,
+                    "hipaa_safe_harbor_hits": sorted(hipaa_hits),
+                    "malicious_text": next(iter(matches_by_label))[:80],
+                },
+                module=self.name,
+                confidence=0.85,
             )
         ]

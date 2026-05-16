@@ -17,7 +17,11 @@ DocFirewall includes a suite of specialized detectors mapped to specific threat 
 | **PPTX** | ✅ | ✅ | Slide XML, macros, external refs, hidden shapes |
 | **XLSX** | ✅ | ✅ | Sheet XML, macros, DDE formulas, shared strings |
 | **RTF** | ✅ | ✅ | OLE objects, JS, `\bin` streams, `\fldinstr` |
-| **HTML** | ✅ | ✅ | `<script>`, inline events, `<iframe>`, CSS hidden text |
+| **HTML** | ✅ | ✅ | `<script>`, inline events, `<iframe>`, CSS hidden text, SVG/MathML/`atob`+Blob smuggling |
+| **DOC / XLS / PPT** | ✅ | ✅ | Legacy OLE2/CFB: VBA stomping (P-code-only macros), `vbaProject.bin`, embedded OLE |
+| **CSV / TSV** | ✅ | ✅ | Formula injection (`=cmd\|`, `=WEBSERVICE`, `=HYPERLINK`), DDE payloads |
+| **ODT / ODS / ODP** | ✅ | ✅ | OpenDocument: `macro://` (CVE-2023-2255), `Scripts/`, Basic macros, hidden-text styling |
+| **ZIP / TAR** | ✅ | ✅ | Recursive member scan (depth 3), per-member findings |
 
 ---
 
@@ -25,7 +29,8 @@ DocFirewall includes a suite of specialized detectors mapped to specific threat 
 
 ### 1. Malware & Active Content (T1, T2)
 
-- **Built-in YARA Ruleset (T1)** — 38+ curated rules for document-targeting malware families: Emotet, TrickBot, Dridex, PDF heap-spray exploits (CVE-2010-0188, CVE-2013-2729), RTF Equation Editor RCE (CVE-2017-11882, CVE-2018-0802), **XLM (Excel 4.0) macros**, **CVE-2023-27363** (Foxit RCE), **CVE-2023-2255** (LibreOffice macro: URI), **VBA indirect execution** (CallByName / Application.Run), polyglot files (PDF+ZIP, PDF+HTML, PDF+RTF, DOCX+HTML), embedded PE/ELF. Enable via `enable_builtin_yara_rules=True` (on by default in all profiles from v0.7.0).
+- **Built-in YARA Ruleset (T1)** — 53 curated rules for document-targeting malware families: Emotet, TrickBot, Dridex, PDF heap-spray exploits (CVE-2010-0188, CVE-2013-2729), RTF Equation Editor RCE (CVE-2017-11882, CVE-2018-0802), **XLM (Excel 4.0) macros**, **CVE-2023-27363** (Foxit RCE), **CVE-2023-2255** (LibreOffice macro: URI), **CVE-2021-30860** (JBIG2 FORCEDENTRY), **VBA indirect execution** (CallByName / Application.Run), polyglot files (PDF+ZIP, PDF+HTML, PDF+RTF, DOCX+HTML), embedded PE/ELF/Mach-O. Each rule carries `meta.cve` / `meta.mitre`. Enable via `enable_builtin_yara_rules=True` (on by default in all profiles).
+- **VBA Stomping Detection (T1)** — Legacy OLE `.doc`/`.xls`/`.ppt` and embedded `vbaProject.bin` are inspected for P-code-only macros (compiled `_VBA_PROJECT` / `__SRP_` streams with stripped source) — a common AV-evasion technique that source-only scanners miss.
 - **Antivirus Integration (T1)** — ClamAV (socket or binary), VirusTotal, or any generic CLI tool.
 - **Recursive Archive Scanning (T1, T7)** — ZIP and tar (.gz/.bz2) archives are unpacked to a temp directory and each member scanned recursively up to `limits.max_archive_depth` (default 3). Sub-scan findings include `evidence["archive_member"]` indicating the originating path. Members exceeding `max_mb` are flagged T6 and skipped. Enable via `enable_archive_scan=True` (default).
 - **Password-Protected Document Detection (T1)** — PDF `/Encrypt X Y R` indirect reference → T1 MEDIUM (scanner cannot read plaintext). Encrypted DOCX/XLSX/PPTX (OLE2 CFB container magic bytes) → T1 MEDIUM, early return. RTF `\*\password` destination → T1 MEDIUM.
@@ -41,15 +46,16 @@ DocFirewall includes a suite of specialized detectors mapped to specific threat 
 ### 2. LLM Integrity (T4, T5, T9, T10, T11, T12)
 
 - **Prompt Injection (T4)** — 5-layer detection pipeline:
-  - **L0**: Unicode normalization (homoglyphs, zero-width, BIDI, tag characters U+E0000–U+E007F, variation selectors U+FE00–U+FE0F)
+  - **L0**: Unicode normalization (homoglyphs, zero-width, BIDI, tag characters U+E0000–U+E007F, variation selectors U+FE00–U+FE0F, Mathematical-Alphanumeric folding, separator collapse, reversed-text)
   - **L0b**: Inter-character space collapse — "i g n o r e" → "ignore" before phrase matching
-  - **L1**: Aho-Corasick O(n) phrase matching — 145+ phrases in 13 languages
-  - **L2**: Regex fuzzy matching — whitespace-tolerant variant detection
+  - **L1**: Aho-Corasick O(n) phrase matching — multilingual phrase set across 22 languages
+  - **L2**: Regex fuzzy matching — whitespace-tolerant + edit-distance-1 variant detection (opt-in)
   - **L3**: Sliding-window DeBERTa classifier (local, air-gapped)
   - **L4**: Semantic nearest-neighbour over 80 multilingual attack anchors (cosine similarity, `sentence-transformers`)
 - **PDF Annotation Injection (T4)** — `/Annots /Contents` strings are extracted from annotation dictionaries and scanned against the full injection keyword list. Annotation text is included in LLM extraction but was previously unscanned.
 - **DOCX CustomXML Injection (T4)** — `customXml/*.xml` parts are scanned for injection keywords. CustomXML is read by Office automation and LLM document loaders.
-- **Multilingual Coverage** — English, German, French, Spanish, Italian, Portuguese, Russian, Dutch, Polish, Chinese (Simplified), Japanese, Korean, Arabic.
+- **Multilingual Coverage** — 22 languages including English, German, French, Spanish, Italian, Portuguese, Russian, Dutch, Polish, Chinese (Simplified), Japanese, Korean, Arabic, plus Hindi, Turkish, Vietnamese, Indonesian, Thai, Hebrew, Swedish, Czech, and Ukrainian.
+- **GCG Adversarial-Suffix Detection (T4, opt-in)** — A perplexity / character-n-gram analyzer flags GCG-style (Zou et al.) adversarial suffixes — high-surprise gibberish appended to a clean prompt. Off by default (`enable_perplexity_check=False`): character statistics alone cannot separate real GCG suffixes from dense legal/contract formatting, so it is precision-hardened and opt-in.
 - **Ranking Manipulation (T5)** — TF-IDF drift and Jaccard distance anomaly detection.
 - **ATS Manipulation (T9)** — Hidden text (white-on-white, vanish property, tiny fonts), off-page positioning, metadata keyword stuffing. Keyword frequency check fires on **any** token exceeding 8% of total words (ungated — catches natural stuffing like "Python" × 80 that the previous ats_keywords gate missed). Known attack tokens fire at ≥ 4%. Top-2 tokens combined > 15% fires a distributed-stuffing finding.
 - **Semantic Paraphrase Stuffing (T9)** — When `enable_semantic_nn=True`, sentence embeddings are clustered at cosine similarity ≥ 0.85. If the largest semantic cluster exceeds 40% of sentences → T9 HIGH; > 60% → T9 CRITICAL. Catches synonym rotation ("experienced developer / skilled programmer / seasoned coder") that evades TF-IDF and Jaccard.
@@ -62,9 +68,13 @@ DocFirewall includes a suite of specialized detectors mapped to specific threat 
 
 ### 3. Evasion & Obfuscation (T3)
 
-- **Unicode normalization** — Cyrillic/Greek homoglyphs (including uppercase Cyrillic А В С Е Н К М О Р Т Х), fullwidth ASCII, zero-width joiners, BIDI overrides, tag characters (U+E0000–U+E007F), and variation selectors (U+FE00–U+FE0F + U+E0100–U+E01EF) — all stripped before pattern matching.
+- **Unicode normalization** — Cyrillic/Greek/Armenian/Cherokee/Coptic/IPA homoglyphs (including uppercase Cyrillic А В С Е Н К М О Р Т Х), fullwidth ASCII, zero-width joiners, BIDI overrides, tag characters (U+E0000–U+E007F), and variation selectors (U+FE00–U+FE0F + U+E0100–U+E01EF) — all stripped before pattern matching.
+- **Mathematical-Alphanumeric Folding** — Styled letter ranges (U+1D400+ bold/italic/script/fraktur/double-struck, plus super/subscript and Letterlike symbols) are folded to ASCII so "𝐢𝐠𝐧𝐨𝐫𝐞 𝐚𝐥𝐥" is matched as "ignore all".
+- **Reversed-Text Matching** — Right-to-left / character-reversed injection (e.g. "snoitcurtsni suoiverp lla erongi") is detected by also scanning the reversed normalized stream.
+- **Separator Normalization** — Single-character and inter-letter separators (`i.g.n.o.r.e`, `i-g-n-o-r-e`, `i•g•n•o•r•e`) are collapsed before phrase matching.
 - **Space-Separated Character Collapse** — "i g n o r e   a l l   p r e v i o u s" collapsed to "ignore all previous" before phrase matching, defeating a well-known Aho-Corasick evasion.
 - **PDF Font-Substitution** — ToUnicode CMap analysis (raw bytes + FlateDecode-decompressed streams) detects glyph remapping attacks where on-screen text differs from extracted text.
+- **PDF `/ActualText` Overlay** — High `/ActualText` span density (text that renders one way but extracts another) is flagged: an attacker can show benign prose to a human while feeding injection text to an extraction-based LLM loader.
 - **PDF Optional Content Groups** — `/OCProperties` presence flags T3 MEDIUM. Attackers configure OCG layers as hidden (/OFF) to conceal injection text from PDF viewers while keeping it parseable by text-extraction libraries.
 - **PDF Incremental Update Layers** — Multiple `%%EOF` markers indicate incremental saves. More than one `%%EOF` → T3 MEDIUM "PDF Incremental Update Layers" (PDF shadow attack vector).
 - **CMYK White Text** — `0 0 0 0 k` (all-zero CMYK = white in subtractive model) detected alongside the RGB `1 1 1 rg` pattern.
@@ -92,10 +102,11 @@ Enable `enable_steganography_checks=True` for the additional image-level checks 
 - **Metadata Injection (T8)** — Buffer overflows and syntax injection in PDF info dicts, DOCX/PPTX/XLSX core properties, and HTML `<meta>` tags. All metadata fields are now checked against the full T4 prompt-injection pattern set (~50 regexes), not just 9 hardcoded patterns.
 - **Office CustomXML Injection (T8, T4)** — `customXml/item*.xml` parts are scanned for prompt-injection keywords. CustomXML is read by LLM document loaders but was previously unscanned.
 - **XXE Defense** — All XML parsers (DOCX, PPTX, XLSX) use `defusedxml` to block XML External Entities and prevent SSRF.
+- **Embedded-Media Metadata (T8)** — Audio/video containers (ID3, MP4/`moov`, RIFF/WAV, Vorbis comments) embedded in or attached to documents are parsed (mutagen-optional, with a byte-scan fallback) and their tag fields scanned for injected instructions. Enable via `enable_media_metadata_scan=True` (on by default).
 
 ### 6. Data Privacy
 
-- **PII Detector** — SSN, email, phone number, credit card patterns.
+- **PII Detector (T8, HIPAA Safe-Harbor)** — A regex subset of the HIPAA Safe-Harbor identifiers: SSN, medical-record / health-plan / account numbers, dates of birth/admission/discharge, email, phone, fax, IPv4, VIN, device serial, credit card, IBAN. Each hit records its Safe-Harbor index in `evidence["hipaa_safe_harbor_hits"]`; XMP metadata is scanned in addition to body text. (NER-only identifiers such as full names and sub-state geography are deliberately out of scope to keep the 0.00% benign-corpus false-positive rate.)
 - **Secrets Detector** — API keys, passwords, and tokens via Shannon entropy scoring (H > 5.5 bits/byte).
 
 ---

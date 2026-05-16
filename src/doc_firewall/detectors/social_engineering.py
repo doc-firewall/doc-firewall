@@ -118,6 +118,53 @@ _LEGAL_THREAT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# D.12: Cryptocurrency wallet patterns. The address alone is LOW (legitimate
+# documents quote them); MEDIUM when adjacent to a payment-demand verb;
+# HIGH when also adjacent to an urgency phrase.
+_CRYPTO_ADDR_RE = re.compile(
+    r'\b(?:'
+    r'(?:bc1|[13])[a-zA-HJ-NP-Z0-9]{25,39}'                 # BTC (legacy + bech32)
+    r'|0x[a-fA-F0-9]{40}'                                    # ETH / EVM
+    r'|4[0-9A-B][0-9a-zA-Z]{93}'                             # Monero
+    r'|T[A-HJ-NP-Z0-9]{33}'                                  # TRON / USDT-TRC20
+    r'|D[5-9A-HJ-NP-U][1-9A-HJ-NP-Za-km-z]{32}'              # Dogecoin
+    r')\b',
+)
+_CRYPTO_PAYMENT_VERB_RE = re.compile(
+    r'\b(?:send|pay|transfer|deposit|wire|deliver|forward)\b', re.IGNORECASE
+)
+
+# D.12: Gift-card payment demands — a documented IRS/refund scam pattern.
+_GIFT_CARD_RE = re.compile(
+    r'\b(?:'
+    r'(?:pay|purchase|buy|send|provide|use)\s+(?:a\s+|an\s+|the\s+)?'
+    r'(?:apple\s+(?:i?tunes?|gift)|google\s+(?:play|gift)|amazon\s+gift|'
+    r'steam\s+(?:wallet|gift)|walmart\s+gift|target\s+gift|'
+    r'visa\s+(?:gift|prepaid)|moneygram|western\s+union)\s+'
+    r'(?:cards?|codes?|vouchers?|certificates?|wallets?)'
+    r'|(?:apple|google\s+play|steam|amazon)\s+gift\s+card\s+codes?\b'
+    r')',
+    re.IGNORECASE,
+)
+
+# D.12: Tech-support scam — toll-free callback + "your computer is infected".
+# Single-pattern requires both a toll-free number indicator AND infection
+# language within the same window to avoid false positives on legitimate
+# IT-support docs.
+_TECH_SUPPORT_NUM_RE = re.compile(
+    r'\b(?:1[\s.\-]?)?(?:800|888|877|866|855|844|833|822)[\s.\-]?\d{3}[\s.\-]?\d{4}\b'
+)
+_INFECTION_LANG_RE = re.compile(
+    r'\b(?:'
+    r'(?:your\s+)?(?:computer|pc|device|system|mac|laptop)\s+(?:is|has\s+been)\s+'
+    r'(?:infected|compromised|hacked|locked|under\s+attack|at\s+risk)'
+    r'|(?:critical|urgent|severe)\s+(?:virus|malware|security)\s+(?:alert|warning|threat)\s+detected'
+    r'|microsoft\s+(?:has\s+)?detected\s+(?:a\s+)?(?:virus|threat|malware)'
+    r'|call\s+(?:our\s+)?(?:support|technician|microsoft|apple)\s+(?:immediately|right\s+now|now)'
+    r')',
+    re.IGNORECASE,
+)
+
 
 def _find_signal_positions(pattern: re.Pattern[str], text: str) -> list[int]:
     """Return start positions of all matches."""
@@ -142,6 +189,98 @@ class SocialEngineeringDetector(Detector):
         text = doc.text or ""
         if not text:
             return findings
+
+        # D.12: Gift-card payment demands — single signal HIGH (IRS/refund scam)
+        m_gc = _GIFT_CARD_RE.search(text)
+        if m_gc:
+            snippet = text[max(0, m_gc.start() - 100): m_gc.end() + 200].strip()
+            findings.append(Finding(
+                threat_id=ThreatID.T12_SOCIAL_ENGINEERING,
+                severity=Severity.HIGH,
+                title="Social Engineering — Gift-Card Payment Demand",
+                explain=(
+                    f"Document requests payment via gift cards ('{m_gc.group()[:80]}'). "
+                    "Gift-card payment demands are a hallmark of IRS/refund/utility "
+                    "scams; legitimate businesses never request gift cards as payment."
+                ),
+                evidence={
+                    "subtype": "gift_card_demand",
+                    "matched_text": m_gc.group()[:100],
+                    "snippet": snippet[:250],
+                    "malicious_text": snippet[:300],
+                },
+                module=self.name,
+                confidence=0.92,
+                mitre_technique=_MITRE,
+                attack_objective="Extract untraceable payment via gift cards",
+            ))
+            return findings
+
+        # D.12: Tech-support scam — toll-free number AND infection language.
+        m_num = _TECH_SUPPORT_NUM_RE.search(text)
+        m_inf = _INFECTION_LANG_RE.search(text)
+        if m_num and m_inf and abs(m_num.start() - m_inf.start()) <= 800:
+            snippet = text[
+                max(0, min(m_num.start(), m_inf.start()) - 50):
+                max(m_num.end(), m_inf.end()) + 150
+            ].strip()
+            findings.append(Finding(
+                threat_id=ThreatID.T12_SOCIAL_ENGINEERING,
+                severity=Severity.HIGH,
+                title="Social Engineering — Tech-Support Scam",
+                explain=(
+                    f"Document contains a toll-free callback number "
+                    f"('{m_num.group()}') co-located with infection-warning "
+                    f"language ('{m_inf.group()[:60]}'). Classic tech-support "
+                    "scam pattern."
+                ),
+                evidence={
+                    "subtype": "tech_support_scam",
+                    "callback_number": m_num.group(),
+                    "infection_phrase": m_inf.group()[:80],
+                    "snippet": snippet[:250],
+                    "malicious_text": snippet[:300],
+                },
+                module=self.name,
+                confidence=0.88,
+                mitre_technique=_MITRE,
+                attack_objective="Bait victim to call attacker-controlled tech-support line",
+            ))
+            return findings
+
+        # D.12: Cryptocurrency address + payment verb — escalates with urgency
+        m_crypto = _CRYPTO_ADDR_RE.search(text)
+        if m_crypto:
+            window = text[max(0, m_crypto.start() - 200): m_crypto.end() + 200]
+            has_payment_verb = bool(_CRYPTO_PAYMENT_VERB_RE.search(window))
+            has_urgency = bool(_URGENCY_RE.search(window))
+            if has_payment_verb:
+                crypto_sev = Severity.HIGH if has_urgency else Severity.MEDIUM
+                snippet = window.strip()
+                findings.append(Finding(
+                    threat_id=ThreatID.T12_SOCIAL_ENGINEERING,
+                    severity=crypto_sev,
+                    title="Social Engineering — Cryptocurrency Payment Demand",
+                    explain=(
+                        f"Document references cryptocurrency wallet "
+                        f"'{m_crypto.group()[:40]}…' alongside a payment-demand "
+                        "verb"
+                        + (" and urgency phrasing" if has_urgency else "")
+                        + ". Crypto-payment demands are a top BEC / extortion vector."
+                    ),
+                    evidence={
+                        "subtype": "crypto_payment_demand",
+                        "wallet_address": m_crypto.group(),
+                        "urgency_present": has_urgency,
+                        "snippet": snippet[:250],
+                        "malicious_text": snippet[:300],
+                    },
+                    module=self.name,
+                    confidence=0.85 if has_urgency else 0.72,
+                    mitre_technique=_MITRE,
+                    attack_objective="Redirect funds to attacker-controlled crypto wallet",
+                ))
+                return findings
 
         # ── High-confidence single-signal overrides (HIGH without proximity) ─
         for label, pattern, objective in [
@@ -200,9 +339,16 @@ class SocialEngineeringDetector(Detector):
                         best = dist
             return best
 
-        # Check each signal-pair combination
+        # Check each signal-pair combination.
+        #
+        # G.5 precision fix: the urgency+authority (A+B) pair WITHOUT an
+        # action demand is removed — legitimate IT security policies, HR
+        # handbooks, and incident-response runbooks routinely co-locate
+        # urgency ("within 4 hours") with authority ("the security team",
+        # "your manager") and that is normal business language, not
+        # phishing. A genuine social-engineering lure also issues an action
+        # demand (C). MEDIUM co-occurrence therefore requires signal C.
         pairs = [
-            ("urgency + authority", a_positions, b_positions, "urgency", "authority_claim"),
             ("urgency + action_demand", a_positions, c_positions, "urgency", "action_demand"),
             ("authority + action_demand", b_positions, c_positions, "authority_claim", "action_demand"),
         ]

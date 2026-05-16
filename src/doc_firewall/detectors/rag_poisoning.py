@@ -152,6 +152,48 @@ class RAGPoisoningDetector(Detector):
             if m:
                 hits.append(m.group())
 
+        # D.10: chunk-boundary split detection.  A payload split across a
+        # newline / page break / inserted whitespace at character ~510 (the
+        # boundary used by most RAG chunkers at 512 tokens for English) shows
+        # up only when whitespace is collapsed.  Compare the whitespace-
+        # collapsed text against the raw text and fire MEDIUM if a phrase
+        # exists in the collapsed form but not the raw.
+        if not hits:
+            collapsed = re.sub(r"\s+", " ", text)
+            for pattern in _AUTHORITY_PATTERNS:
+                m_raw = pattern.search(text)
+                m_col = pattern.search(collapsed)
+                if m_col and not m_raw:
+                    snippet = collapsed[
+                        max(0, m_col.start() - 80): m_col.end() + 100
+                    ].strip()
+                    findings.append(Finding(
+                        threat_id=ThreatID.T11_RAG_POISONING,
+                        severity=Severity.MEDIUM,
+                        title="RAG Authority Phrase — Chunk-Boundary Split",
+                        explain=(
+                            "Authority-assertion phrase reconstructable only "
+                            "after whitespace normalization. Attackers split the "
+                            "payload across a newline / page break / chunk "
+                            "boundary so it evades the raw-text scan but "
+                            "rejoins inside a typical RAG retrieval window."
+                        ),
+                        evidence={
+                            "subtype": "chunk_boundary_split",
+                            "matched_phrase": m_col.group()[:80],
+                            "snippet": snippet[:250],
+                            "malicious_text": snippet[:300],
+                        },
+                        module=self.name,
+                        confidence=0.70,
+                        mitre_technique=_MITRE,
+                        attack_objective=(
+                            "Split RAG-poisoning payload across chunk boundary "
+                            "to evade single-pass scans"
+                        ),
+                    ))
+                    break
+
         if hits:
             n = len(hits)
             severity = Severity.HIGH if n >= _A_HIGH_THRESHOLD else Severity.MEDIUM

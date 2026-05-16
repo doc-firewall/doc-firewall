@@ -5,7 +5,7 @@ DocFirewall supports **Advanced Local Machine Learning** and **Heuristic Detecto
 ## 1. Advanced Prompt Injection — Multi-Layer Pipeline
 *Maps to: T4 (Prompt Injection)*
 
-A five-layer architecture covering 13 languages and all major LLM tool-call schemas.
+A five-layer architecture covering 22 languages and all major LLM tool-call schemas.
 
 ### Layer 0 — Normalization
 All text is normalized before pattern matching to defeat homoglyph and whitespace-injection bypasses:
@@ -18,7 +18,7 @@ Normalization is applied to all downstream layers. Documents with obfuscation ch
 
 ### Layer 1 — Aho-Corasick Phrase Matching (< 1 ms)
 
-Finite-state automaton over **145+ injection phrases** in 13 languages:
+Finite-state automaton over an expanded **multilingual injection-phrase set across 22 languages**:
 
 | Language Group | Example Phrases |
 |---|---|
@@ -64,7 +64,7 @@ This layer runs **unconditionally** when enabled, regardless of whether L1/L2 al
 
 ### Layer 4 — Semantic Nearest-Neighbour (optional)
 
-Opt-in semantic layer using `sentence-transformers` and cosine similarity over **80 multilingual attack anchor phrases** covering all 13 languages and OWASP LLM01 attack categories. No FAISS or internet access required.
+Opt-in semantic layer using `sentence-transformers` and cosine similarity over a multilingual attack-anchor set covering the 22 supported languages and OWASP LLM01 attack categories. No FAISS or internet access required.
 
 Similarity threshold: **0.72** (recall-tuned default, lowered from 0.80).
 

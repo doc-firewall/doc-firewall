@@ -32,6 +32,26 @@ _PATTERN_FONT_SIZE_0   = re.compile(rb"font-size\s*:\s*0", re.IGNORECASE)
 _PATTERN_WHITE_COLOR   = re.compile(rb"color\s*:\s*(white|#fff(?:fff)?)\b", re.IGNORECASE)
 _PATTERN_OPACITY_0     = re.compile(rb"opacity\s*:\s*0\b", re.IGNORECASE)
 
+# D.9: SVG / MathML / CSS / object-embed / HTML smuggling vectors
+_PATTERN_SVG_SCRIPT    = re.compile(rb"<svg\b[^>]*>.{0,2000}?<script\b", re.IGNORECASE | re.DOTALL)
+_PATTERN_SVG_ONEVENT   = re.compile(rb"<svg\b[^>]*\bon\w{2,16}\s*=", re.IGNORECASE)
+_PATTERN_SVG_FOREIGN   = re.compile(rb"<svg\b[^>]*>.{0,2000}?<foreignObject\b", re.IGNORECASE | re.DOTALL)
+_PATTERN_MATHML_HREF   = re.compile(rb"<math\b[^>]*>.{0,2000}?\bxlink:href\s*=", re.IGNORECASE | re.DOTALL)
+_PATTERN_CSS_AT_IMPORT_JS = re.compile(rb"@import\s+url\(\s*['\"]?javascript:", re.IGNORECASE)
+_PATTERN_CSS_URL_JS    = re.compile(rb"\burl\(\s*['\"]?javascript:", re.IGNORECASE)
+_PATTERN_OBJECT        = re.compile(rb"<object\b[^>]*\b(?:data|src)\s*=", re.IGNORECASE)
+_PATTERN_EMBED         = re.compile(rb"<embed\b[^>]*\bsrc\s*=", re.IGNORECASE)
+_PATTERN_SCRIPT_TYPE_MODULE = re.compile(rb"<script\b[^>]*\btype\s*=\s*['\"]?module", re.IGNORECASE)
+# HTML smuggling — large base64 atob() decode reassembled into a Blob
+_PATTERN_HTML_SMUGGLE  = re.compile(
+    rb"\batob\(\s*['\"][A-Za-z0-9+/=]{500,}['\"]\s*\)",
+    re.IGNORECASE,
+)
+_PATTERN_BLOB_CTOR     = re.compile(
+    rb"new\s+Blob\s*\(|URL\.createObjectURL\s*\(",
+    re.IGNORECASE,
+)
+
 
 def fast_scan_html(file_path: str, config: ScanConfig) -> List[Finding]:
     findings: List[Finding] = []
@@ -119,6 +139,129 @@ def fast_scan_html(file_path: str, config: ScanConfig) -> List[Finding]:
                 ),
                 evidence={"malicious_text": "<form action=https://..."},
                 module="html.fast_scan",
+            ))
+
+        # D.9: SVG / MathML / CSS / object / embed / module / smuggling
+        if _PATTERN_SVG_SCRIPT.search(data) or _PATTERN_SVG_ONEVENT.search(data):
+            findings.append(Finding(
+                threat_id=ThreatID.T2_ACTIVE_CONTENT,
+                severity=Severity.HIGH,
+                confidence=0.90,
+                title="SVG with Embedded Script / Event Handler",
+                explain=(
+                    "SVG element contains <script> or an inline event handler. "
+                    "SVG-XSS is a documented evasion path for HTML sanitisers."
+                ),
+                evidence={"subtype": "svg_xss", "malicious_text": "<svg>...<script"},
+                module="html.fast_scan",
+            ))
+
+        if _PATTERN_SVG_FOREIGN.search(data):
+            findings.append(Finding(
+                threat_id=ThreatID.T2_ACTIVE_CONTENT,
+                severity=Severity.MEDIUM,
+                confidence=0.75,
+                title="SVG <foreignObject> Element",
+                explain=(
+                    "SVG <foreignObject> can host arbitrary HTML — used to "
+                    "smuggle scripts past sanitisers that whitelist SVG."
+                ),
+                evidence={"subtype": "svg_foreign_object",
+                          "malicious_text": "<foreignObject"},
+                module="html.fast_scan",
+            ))
+
+        if _PATTERN_MATHML_HREF.search(data):
+            findings.append(Finding(
+                threat_id=ThreatID.T2_ACTIVE_CONTENT,
+                severity=Severity.MEDIUM,
+                confidence=0.75,
+                title="MathML xlink:href",
+                explain=(
+                    "MathML element contains xlink:href — historic XSS surface "
+                    "via xlink:href=\"javascript:...\" forms."
+                ),
+                evidence={"subtype": "mathml_href",
+                          "malicious_text": "<math> xlink:href"},
+                module="html.fast_scan",
+            ))
+
+        if _PATTERN_CSS_AT_IMPORT_JS.search(data) or _PATTERN_CSS_URL_JS.search(data):
+            findings.append(Finding(
+                threat_id=ThreatID.T2_ACTIVE_CONTENT,
+                severity=Severity.HIGH,
+                confidence=0.90,
+                title="CSS javascript: URL",
+                explain=(
+                    "CSS @import or url() references a javascript: URI — "
+                    "executes script via legacy CSS evaluation paths."
+                ),
+                evidence={"subtype": "css_javascript_uri",
+                          "malicious_text": "css url(javascript:"},
+                module="html.fast_scan",
+            ))
+
+        if _PATTERN_OBJECT.search(data):
+            findings.append(Finding(
+                threat_id=ThreatID.T2_ACTIVE_CONTENT,
+                severity=Severity.MEDIUM,
+                confidence=0.70,
+                title="HTML <object> Element",
+                explain=(
+                    "<object data=…> can load Flash/Java/PDF and execute "
+                    "embedded plugin code."
+                ),
+                evidence={"subtype": "object_tag",
+                          "malicious_text": "<object data="},
+                module="html.fast_scan",
+            ))
+
+        if _PATTERN_EMBED.search(data):
+            findings.append(Finding(
+                threat_id=ThreatID.T2_ACTIVE_CONTENT,
+                severity=Severity.MEDIUM,
+                confidence=0.70,
+                title="HTML <embed> Element",
+                explain=(
+                    "<embed src=…> loads plugin content — historic exploit "
+                    "delivery for Flash/Silverlight/PDF."
+                ),
+                evidence={"subtype": "embed_tag",
+                          "malicious_text": "<embed src="},
+                module="html.fast_scan",
+            ))
+
+        if _PATTERN_SCRIPT_TYPE_MODULE.search(data):
+            findings.append(Finding(
+                threat_id=ThreatID.T2_ACTIVE_CONTENT,
+                severity=Severity.MEDIUM,
+                confidence=0.70,
+                title="HTML ES Module Script",
+                explain=(
+                    "<script type=\"module\"> imports remote ESM resources "
+                    "(import statements bypass naive sanitiser logic)."
+                ),
+                evidence={"subtype": "script_module",
+                          "malicious_text": "<script type=module"},
+                module="html.fast_scan",
+            ))
+
+        # HTML smuggling — large atob() decode + Blob constructor reassembly
+        if _PATTERN_HTML_SMUGGLE.search(data) and _PATTERN_BLOB_CTOR.search(data):
+            findings.append(Finding(
+                threat_id=ThreatID.T7_EMBEDDED_PAYLOAD,
+                severity=Severity.HIGH,
+                confidence=0.85,
+                title="HTML Smuggling Indicator (atob + Blob)",
+                explain=(
+                    "Document contains a large base64 blob decoded via atob() "
+                    "and reassembled via Blob() / URL.createObjectURL() — the "
+                    "canonical HTML-smuggling delivery pattern."
+                ),
+                evidence={"subtype": "html_smuggling",
+                          "malicious_text": "atob(...) + new Blob"},
+                module="html.fast_scan",
+                mitre_technique="T1027.006",
             ))
 
     # ── T7: data: URI with base64 blob ──────────────────────────────────────

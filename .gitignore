@@ -103,3 +103,9 @@ check_*.py
 # Generated scan result artifacts
 scan_results.md
 scan_results_*.md
+
+# Internal-only, out-of-tree dev tooling (G.1/G.2) — NOT shipped, NOT pushed.
+# Public-release of these tools is a deliberately deferred decision
+# (see roadmap_2_0.md, Phase G distribution policy).
+tooling/
+redteam_report.json

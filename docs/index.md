@@ -1,6 +1,6 @@
 ---
 title: DocFirewall — Secure Document Scanner for AI & RAG Pipelines
-description: DocFirewall is an open-source Python library that detects prompt injection, malware, and data exfiltration in PDF, DOCX, PPTX, and XLSX files before they reach your LLM or RAG pipeline.
+description: DocFirewall is an open-source Python library that detects prompt injection, malware, and data exfiltration in PDF, DOCX, PPTX, XLSX, RTF, HTML, legacy Office, CSV/TSV, and OpenDocument files before they reach your LLM or RAG pipeline.
 hide:
   - navigation
   - toc
@@ -12,12 +12,12 @@ hide:
 
 ## Key Features
 
--   **Comprehensive Threat Model**: Detects 9 distinct threat vectors (T1-T9), including Obfuscation, Prompt Injection, and Layout Manipulation.
+-   **Comprehensive Threat Model**: Detects 12 distinct threat vectors (T1–T12), including Obfuscation, Prompt Injection, Indirect/Multi-Hop Injection, RAG Poisoning, Social Engineering, and Layout Manipulation.
 -   **Deep Inspection**: Parses document structure to find hidden payloads in metadata, invisible text, and embedded objects.
 -   **Extensible Architecture**: Plug-and-play support for custom detectors, including YARA rules and ML models.
 -   **Docker Ready**: Full containerized benchmark suite for rigorous security validation.
 
-## Threat Coverage (T1-T9)
+## Threat Coverage (T1–T12)
 
 The system is evaluated against a rigorous dataset of **410 test cases** covering:
 

@@ -198,4 +198,33 @@ def detect_pdf_obfuscation(doc: ParsedDocument, config: ScanConfig) -> List[Find
             module="pdf.obfuscation.cmap",
         ))
 
+    # D.16: /ActualText overlay — PDF operator that overrides the extracted
+    # text for an enclosing span.  Attackers use it so the rendered glyphs
+    # show one string while text extractors (and LLMs) see another.  A high
+    # *count* of /ActualText spans in a single file is the cheap heuristic;
+    # value divergence requires the content stream, which we don't fully
+    # parse here.
+    _ACTUAL_TEXT_RE = re.compile(rb"/ActualText\s*[(\[<]")
+    actual_text_count = len(_ACTUAL_TEXT_RE.findall(pdf_data))
+    if actual_text_count >= 5:
+        findings.append(Finding(
+            threat_id=ThreatID.T3_OBFUSCATION,
+            severity=Severity.MEDIUM if actual_text_count < 25 else Severity.HIGH,
+            confidence=0.70 if actual_text_count < 25 else 0.85,
+            title="PDF /ActualText Overlay Density",
+            explain=(
+                f"PDF contains {actual_text_count} /ActualText operators. "
+                "/ActualText overrides the extracted Unicode for a marked-content "
+                "span — attackers use it so the rendered text differs from what "
+                "text extractors and LLMs see. Legitimate accessibility usage is "
+                "rare and bounded."
+            ),
+            evidence={
+                "subtype": "actual_text_overlay",
+                "count": actual_text_count,
+                "malicious_text": f"/ActualText × {actual_text_count}",
+            },
+            module="pdf.obfuscation.actual_text",
+        ))
+
     return findings

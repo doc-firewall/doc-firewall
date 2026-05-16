@@ -84,7 +84,7 @@ config = ScanConfig(
     # T3: Obfuscation (hidden content, CMap analysis)
     enable_obfuscation_checks=True,
 
-    # T4: Prompt Injection (5-layer pipeline, 13 languages)
+    # T4: Prompt Injection (5-layer pipeline, 22 languages)
     enable_prompt_injection=True,
 
     # T5: Ranking Manipulation (TF-IDF drift, Jaccard anomaly)
@@ -126,7 +126,7 @@ YARA and Aho-Corasick are **on by default** in all profiles (see table above). T
 
 ```python
 config = ScanConfig(
-    # Layer 1 — Aho-Corasick O(n) phrase matching (145+ phrases, 13 languages)
+    # Layer 1 — Aho-Corasick O(n) phrase matching (multilingual set, 22 languages)
     enable_advanced_ahocorasick=True,
 
     # Layer 3 — Sliding-window local DeBERTa classifier (CPU/GPU)

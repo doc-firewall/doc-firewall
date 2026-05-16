@@ -2,7 +2,7 @@ from __future__ import annotations
 import re
 import base64
 from typing import List, Tuple
-from .base import Detector
+from .base import Detector, pattern_cache_key
 from ..analyzers.base import ParsedDocument
 from ..config import ScanConfig
 from ..report import Finding
@@ -79,28 +79,57 @@ class PromptInjectionDetector(Detector):
             lambda m: re.sub(r"[ \t\u00A0]", "", m.group(0)),
             text,
         )
+        # 5. F.3a: Collapse single-char-separated obfuscation
+        # ("i-g-n-o-r-e" \u2192 "ignore") for hyphen/dot/underscore/middle-dot.
+        text = re.sub(
+            r"(?<!\w)\w(?:[\-_.\u00B7\u2022]\w){2,}(?!\w)",
+            lambda m: re.sub(r"[\-_.\u00B7\u2022]", "", m.group(0)),
+            text,
+        )
+        # 6. F.3b: Replace inter-letter separators with a space so phrases
+        # like "ignore-all-previous-instructions" match the regex patterns
+        # (which use \s+ between tokens).
+        text = re.sub(r"(?<=[A-Za-z])[\-_.\u00B7\u2022](?=[A-Za-z])", " ", text)
+        # 7. F.3c: Newlines/tabs/NBSP between letters \u2192 single space so
+        # phrases split across line breaks match.
+        text = re.sub(r"(?<=[A-Za-z])[\n\r\t](?=[A-Za-z])", " ", text)
+        text = re.sub(r"[ \t]+", " ", text)
         return text
+
+    def _ensure_compiled(self, config: ScanConfig) -> None:
+        """Compile the prompt-injection regex set, keyed on a stable content
+        hash of the pattern dict (G.4 — replaces the brittle id(config)
+        check that recompiled on every new config object)."""
+        key = pattern_cache_key(config.prompt_injection_patterns)
+        if getattr(self, "_compiled_key", None) == key and hasattr(
+            self, "_compiled_patterns"
+        ):
+            return
+        compiled = []
+        for category, rules in config.prompt_injection_patterns.items():
+            for pat, weight in rules:
+                compiled.append(
+                    {
+                        "category": category,
+                        "regex": re.compile(pat, re.IGNORECASE),
+                        "weight": weight,
+                        "pattern_str": pat,
+                    }
+                )
+        self._compiled_patterns = compiled
+        self._compiled_key = key
+
+    def prepare(self, config: ScanConfig) -> None:
+        # G.4: eager compile at Scanner construction time.
+        if config.enable_prompt_injection:
+            self._ensure_compiled(config)
 
     def run(self, doc: ParsedDocument, config: ScanConfig) -> List[Finding]:
         if not config.enable_prompt_injection:
             return []
 
-        # Compile patterns dynamically from config if not already compiled or if config changed
-        if not hasattr(self, "_compiled_patterns") or getattr(
-            self, "_last_config_id", None
-        ) != id(config):
-            self._compiled_patterns = []
-            for category, rules in config.prompt_injection_patterns.items():
-                for pat, weight in rules:
-                    self._compiled_patterns.append(
-                        {
-                            "category": category,
-                            "regex": re.compile(pat, re.IGNORECASE),
-                            "weight": weight,
-                            "pattern_str": pat,
-                        }
-                    )
-            self._last_config_id = id(config)
+        # Lazily compile if prepare() was never called (standalone use).
+        self._ensure_compiled(config)
 
         texts_to_scan = [("body", doc.text)]
 
@@ -281,6 +310,17 @@ class PromptInjectionDetector(Detector):
             elif total_score >= 2.0:
                 final_sev = Severity.HIGH
 
+            # Confidence scaled from score so a single unambiguous match
+            # (score 2.0) pushes risk above the FLAG threshold on its own.
+            # A T4 HIGH with confidence < ~0.55 gives risk 0.32 (ALLOW);
+            # 0.65 gives 0.42 (FLAG).
+            if total_score >= 6.0:
+                confidence = 0.90
+            elif total_score >= 4.0:
+                confidence = 0.80
+            else:
+                confidence = 0.65
+
             matches.sort(key=lambda x: x["weight"], reverse=True)
 
             findings.append(
@@ -297,6 +337,7 @@ class PromptInjectionDetector(Detector):
                         "top_matches": matches[:5],
                         "malicious_text": matches[0]["match"] if matches else clean_text[:250]
                     },
+                    confidence=confidence,
                     module="detectors.prompt_injection_v2",
                 )
             )

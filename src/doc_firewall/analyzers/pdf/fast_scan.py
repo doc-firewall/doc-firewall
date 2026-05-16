@@ -162,7 +162,19 @@ SUSPICIOUS_TOKENS = [
     b"/ResetForm",
     b"/Named",
     b"/Sound",
+    # D.7: Multimedia / 3D / smuggling vectors
+    b"/RichMedia",     # Embedded Flash/SWF launcher (still parsed by some readers)
+    b"/3D",            # PRC/U3D streams; can carry embedded JavaScript
+    b"/Movie",         # Legacy multimedia annotation
+    b"/GoToE",         # GoTo-Embedded action — used in document-smuggling chains
+    b"/JBIG2Decode",   # CVE-2021-30860 carrier (FORCEDENTRY/Pegasus)
 ]
+
+# D.7: Tokens that warrant CRITICAL severity when found alongside an anomaly.
+_CVE_PDF_TOKENS = {
+    b"/JBIG2Decode": ("CVE-2021-30860", "T1203"),
+    b"/RichMedia":   (None,            "T1203"),
+}
 
 # Simple Soft-Signal keywords for Prompt Injection (triage only)
 STEALTH_CHARS = [
@@ -208,9 +220,11 @@ def fast_scan_pdf(file_path: str, config: ScanConfig) -> List[Finding]:
             if token in [
                 b"/OpenAction", b"/Launch", b"/Encrypt",
                 b"/SubmitForm", b"/XFA",  # data exfiltration vectors
+                b"/RichMedia", b"/GoToE",  # D.7
             ]:
                 sev = Severity.HIGH
 
+            cve_meta = _CVE_PDF_TOKENS.get(token, (None, None))
             findings.append(
                 Finding(
                     threat_id=(
@@ -228,8 +242,45 @@ def fast_scan_pdf(file_path: str, config: ScanConfig) -> List[Finding]:
                     evidence={"token": token.decode("ascii", errors="ignore")},
                     confidence=0.65,
                     module="fast_scan.pdf.tokens",
+                    cve=cve_meta[0],
+                    mitre_technique=cve_meta[1],
                 )
             )
+
+    # D.7: JBIG2 dimension anomaly — CVE-2021-30860 used a JBIG2 stream with
+    # an oversized /Width to overflow a 32-bit integer in CoreGraphics.
+    # Legitimate document images rarely exceed 10 000 px wide.
+    if b"/JBIG2Decode" in data:
+        _DIM_RE = re.compile(rb"/Width\s+(\d{5,})|/Height\s+(\d{5,})")
+        for _dim_m in _DIM_RE.finditer(data):
+            try:
+                val = int(_dim_m.group(1) or _dim_m.group(2))
+            except (TypeError, ValueError):
+                continue
+            if val > 10_000:
+                findings.append(
+                    Finding(
+                        threat_id=ThreatID.T2_ACTIVE_CONTENT,
+                        severity=Severity.CRITICAL,
+                        title="PDF JBIG2 Dimension Anomaly (Possible CVE-2021-30860)",
+                        explain=(
+                            f"JBIG2-decoded image with {val} px dimension — "
+                            "well beyond legitimate document use. CVE-2021-30860 "
+                            "(FORCEDENTRY) exploited oversized JBIG2 dimensions "
+                            "for integer overflow."
+                        ),
+                        evidence={
+                            "subtype": "jbig2_oversize",
+                            "dimension": val,
+                            "malicious_text": f"JBIG2 dimension {val}",
+                        },
+                        confidence=0.90,
+                        module="fast_scan.pdf.jbig2",
+                        cve="CVE-2021-30860",
+                        mitre_technique="T1203",
+                    )
+                )
+                break
 
     # 2. Prompt Injection Keyword Scan
     # Scan raw PDF bytes for known injection keywords to trigger deep scan.
@@ -460,6 +511,53 @@ def fast_scan_pdf(file_path: str, config: ScanConfig) -> List[Finding]:
             )
         )
 
+    # D.14: PDF page-tree cycle detection.  /Type /Pages nodes can declare
+    # `/Kids` arrays that include their own parent → infinite recursion in
+    # pikepdf / pdfminer.  Walk the page-tree subgraph independently of the
+    # XObject cycle scan.
+    if config.enable_dos_checks:
+        try:
+            from ...utils.graph_cycle import has_cycle as _has_cycle
+            _PAGES_HEADER_RE = re.compile(
+                rb"(\d+)\s+0\s+obj\b[^a-zA-Z]*?/Type\s*/Pages\b", re.DOTALL,
+            )
+            _KIDS_RE = re.compile(rb"/Kids\s*\[([^\]]{0,4096})\]")
+            _KID_REF_RE = re.compile(rb"(\d+)\s+0\s+R")
+            page_graph: dict[int, list[int]] = {}
+            for hm in _PAGES_HEADER_RE.finditer(data):
+                obj_num = int(hm.group(1))
+                # Look at the next 8 KB after the header for the /Kids array
+                body = data[hm.end(): hm.end() + 8192]
+                kids_m = _KIDS_RE.search(body)
+                if not kids_m:
+                    continue
+                kids = [int(r.group(1)) for r in _KID_REF_RE.finditer(kids_m.group(1))]
+                page_graph[obj_num] = kids
+                if len(page_graph) > 200:
+                    break  # bomb-PDF guard
+            if page_graph and _has_cycle(page_graph):
+                findings.append(
+                    Finding(
+                        threat_id=ThreatID.T6_DOS,
+                        severity=Severity.HIGH,
+                        title="PDF Page-Tree Cycle (DoS)",
+                        explain=(
+                            "Detected a cycle in the PDF page-tree reference "
+                            "graph (/Type /Pages → /Kids). Cycles cause "
+                            "infinite recursion in PDF renderers and parsers."
+                        ),
+                        evidence={
+                            "subtype": "page_tree_cycle",
+                            "nodes": len(page_graph),
+                            "malicious_text": "PDF page-tree cycle",
+                        },
+                        confidence=0.90,
+                        module="fast_scan.pdf.page_tree",
+                    )
+                )
+        except Exception:
+            pass
+
     # 2h. Circular Form XObject Detection (DoS) — Form XObjects that reference
     # each other in a cycle cause infinite recursion in PDF renderers/parsers.
     if config.enable_dos_checks and _detect_xobject_cycles(data):
@@ -602,13 +700,19 @@ def fast_scan_pdf(file_path: str, config: ScanConfig) -> List[Finding]:
             )
         )
 
-    # 2m. PDF Annotation /Contents keyword scan — B.5
+    # 2m. PDF Annotation /Contents keyword scan — B.5 + E.4
     # Annotation text strings (/Contents inside /Annots) are extracted by
     # PyMuPDF / pdfplumber and consumed by LLMs.  They are outside the body-
     # text scan area and form an entirely unscanned injection surface.
+    # E.4: extended subtypes — Stamp, Caret, FreeText, Polygon, PolyLine,
+    # Ink, Squiggly, Underline, StrikeOut, Highlight all carry /Contents.
     if config.enable_prompt_injection:
         _CONTENTS_RE = re.compile(rb"/Contents\s*\(([^)]{10,500})\)")
-        _ANNOT_NEARBY_RE = re.compile(rb"/Subtype\s*/(?:Text|Widget|FreeText)\b")
+        _ANNOT_NEARBY_RE = re.compile(
+            rb"/Subtype\s*/(?:Text|Widget|FreeText|Stamp|Caret|Polygon|"
+            rb"PolyLine|Ink|Squiggly|Underline|StrikeOut|Highlight|Sound|"
+            rb"FileAttachment|Popup)\b"
+        )
         for _cm in _CONTENTS_RE.finditer(data):
             ann_text_bytes = _cm.group(1)
             ann_text_lower = ann_text_bytes.lower()
@@ -630,6 +734,7 @@ def fast_scan_pdf(file_path: str, config: ScanConfig) -> List[Finding]:
                                 "and LLMs but is outside the body-text scan area."
                             ),
                             evidence={
+                                "subtype": "annotation_contents",
                                 "keyword": kw.decode("ascii", errors="replace"),
                                 "malicious_text": ann_text_bytes[:250].decode(
                                     "ascii", errors="replace"
@@ -640,6 +745,51 @@ def fast_scan_pdf(file_path: str, config: ScanConfig) -> List[Finding]:
                         )
                     )
                     break  # one finding per annotation
+
+        # E.4: AcroForm field default values — /V (current value) and /DV
+        # (default value). Adobe Reader prefills these so an LLM that
+        # extracts form-state sees them. Body-text and /Contents scans miss
+        # them entirely.
+        _FIELD_VALUE_RE = re.compile(
+            rb"/(?:V|DV)\s*\(([^)]{10,800})\)"
+        )
+        _FIELD_NEARBY_RE = re.compile(
+            rb"/(?:T|FT|Ff|Kids|Parent|AA)\s*[(/<\[]"
+        )
+        seen_field_kws: set[bytes] = set()
+        for _vm in _FIELD_VALUE_RE.finditer(data):
+            fld_text_bytes = _vm.group(1)
+            fld_text_lower = fld_text_bytes.lower()
+            ctx_start = max(0, _vm.start() - 500)
+            ctx = data[ctx_start: _vm.start()]
+            if not _FIELD_NEARBY_RE.search(ctx):
+                continue
+            for kw in config.prompt_injection_keywords_bytes:
+                if kw in fld_text_lower and kw not in seen_field_kws:
+                    seen_field_kws.add(kw)
+                    findings.append(
+                        Finding(
+                            threat_id=ThreatID.T4_PROMPT_INJECTION,
+                            severity=Severity.HIGH,
+                            title="Prompt Injection in PDF AcroForm Field Default",
+                            explain=(
+                                "Injection keyword found in an AcroForm field's "
+                                "/V (current value) or /DV (default value). PDF "
+                                "viewers prefill these on render and LLM document "
+                                "loaders include them in extracted form state."
+                            ),
+                            evidence={
+                                "subtype": "acroform_field_default",
+                                "keyword": kw.decode("ascii", errors="replace"),
+                                "malicious_text": fld_text_bytes[:250].decode(
+                                    "ascii", errors="replace"
+                                ),
+                            },
+                            confidence=0.85,
+                            module="fast_scan.pdf.acroform",
+                        )
+                    )
+                    break
 
     # 3. V2 Multi-Signal Obfuscation Logic
     signals = []

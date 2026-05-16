@@ -53,12 +53,31 @@ def _check_hidden_xlsx_styles(content: bytes) -> list[tuple[str, str]]:
     return hits
 
 
+# D.8: XLM (Excel 4.0 macro) execution primitives. These run as formulas
+# regardless of whether the sheet is declared a macrosheet — auto_open ranges
+# can point at an ordinary worksheet that contains EXEC() / CALL().
+_XLM_PRIMITIVES_RE = re.compile(
+    rb"=(?:EXEC|CALL|REGISTER|RUN|FORMULA\.FILL|ALERT|ARGUMENT|DOCUMENTS)\(",
+    re.IGNORECASE,
+)
+# D.8: hidden / veryHidden sheet declarations in xl/workbook.xml.
+_HIDDEN_SHEET_RE = re.compile(
+    rb'<sheet\b[^>]*\bstate\s*=\s*"(hidden|veryHidden)"', re.IGNORECASE
+)
+
+
 def fast_scan_xlsx(file_path: str, config: ScanConfig) -> List[Finding]:
     """Fast structural scan of an XLSX (ZIP-based) file."""
     findings: List[Finding] = []
 
     if not zipfile.is_zipfile(file_path):
         return findings
+
+    # D.8: track veryHidden sheets so we can promote XLM findings to CRITICAL
+    # when a veryHidden sheet co-occurs with XLM execution primitives in any
+    # worksheet XML.
+    very_hidden_sheets: list[str] = []
+    hidden_sheets: list[str] = []
 
     with zipfile.ZipFile(file_path, "r") as zf:
         infolist = zf.infolist()
@@ -127,6 +146,55 @@ def fast_scan_xlsx(file_path: str, config: ScanConfig) -> List[Finding]:
 
         suspicious_parts = 0
 
+        # D.8: detect veryHidden / hidden worksheet declarations.  veryHidden
+        # sheets are not unhideable from the Excel UI and are a standard XLM
+        # hiding technique (Pikabot, IcedID).
+        for z in infolist:
+            if z.filename == "xl/workbook.xml":
+                try:
+                    with zf.open(z) as wbf:
+                        wb_bytes = wbf.read(256 * 1024)
+                    for state_match in _HIDDEN_SHEET_RE.finditer(wb_bytes):
+                        state = state_match.group(1).decode("ascii", errors="ignore")
+                        # Capture the sheet name if available within ±200 bytes
+                        ctx_start = max(0, state_match.start() - 200)
+                        ctx = wb_bytes[ctx_start: state_match.end() + 50]
+                        name_m = re.search(rb'\bname\s*=\s*"([^"]+)"', ctx)
+                        sheet_name = (
+                            name_m.group(1).decode("utf-8", errors="ignore")
+                            if name_m else "unknown"
+                        )
+                        if state == "veryHidden":
+                            very_hidden_sheets.append(sheet_name)
+                        else:
+                            hidden_sheets.append(sheet_name)
+                    if very_hidden_sheets:
+                        findings.append(
+                            Finding(
+                                threat_id=ThreatID.T3_OBFUSCATION,
+                                severity=Severity.HIGH,
+                                title="Excel Very-Hidden Worksheet",
+                                explain=(
+                                    f"Workbook contains {len(very_hidden_sheets)} "
+                                    'sheet(s) declared state="veryHidden": '
+                                    f"{very_hidden_sheets[:5]}. veryHidden sheets "
+                                    "cannot be unhidden from the Excel UI and are "
+                                    "a known XLM macro hiding technique."
+                                ),
+                                evidence={
+                                    "subtype": "very_hidden_sheet",
+                                    "sheets": very_hidden_sheets[:10],
+                                    "count": len(very_hidden_sheets),
+                                    "malicious_text": ", ".join(very_hidden_sheets[:3]),
+                                },
+                                confidence=0.85,
+                                module="fast_scan.xlsx.hidden_sheet",
+                            )
+                        )
+                except Exception:
+                    pass
+                break  # workbook.xml is unique
+
         # 2. Per-part checks
         for z in infolist:
             # Large individual part
@@ -170,6 +238,18 @@ def fast_scan_xlsx(file_path: str, config: ScanConfig) -> List[Finding]:
                         module="fast_scan.xlsx.macros",
                     )
                 )
+                # D.1: scan vbaProject.bin for stomping + shell APIs
+                if (
+                    z.filename.endswith("vbaProject.bin")
+                    and getattr(config, "enable_legacy_office", True)
+                ):
+                    try:
+                        from ..ole.fast_scan import scan_embedded_vbaproject
+                        findings.extend(
+                            scan_embedded_vbaproject(zf, z.filename, config)
+                        )
+                    except Exception as _vba_e:
+                        logger.debug("vbaProject scan failed: %s", _vba_e)
 
             # Embedded objects
             if z.filename.startswith("xl/embeddings/"):
@@ -342,6 +422,49 @@ def fast_scan_xlsx(file_path: str, config: ScanConfig) -> List[Finding]:
                                 )
                             )
                             break  # one T9 finding per sheet
+
+                    # D.8: XLM (Excel 4.0 macro) execution primitives in any
+                    # worksheet XML — even an ordinary sheet may host these
+                    # when auto_open names point at it.  Critical when
+                    # co-located with a veryHidden sheet declaration.
+                    xlm_match = _XLM_PRIMITIVES_RE.search(content)
+                    if xlm_match:
+                        xlm_sev = (
+                            Severity.CRITICAL if very_hidden_sheets else Severity.HIGH
+                        )
+                        primitive = xlm_match.group(0).decode(
+                            "ascii", errors="replace"
+                        )
+                        findings.append(
+                            Finding(
+                                threat_id=ThreatID.T1_MALWARE if very_hidden_sheets
+                                else ThreatID.T2_ACTIVE_CONTENT,
+                                severity=xlm_sev,
+                                title="Excel XLM Macro Primitive in Worksheet",
+                                explain=(
+                                    f"Worksheet {z.filename} contains XLM "
+                                    f"primitive '{primitive}'. XLM (Excel 4.0) "
+                                    "macros execute as formulas; common droppers "
+                                    "(Pikabot, IcedID, Qakbot) hide them in "
+                                    "veryHidden sheets."
+                                    + (
+                                        " Workbook also declares veryHidden "
+                                        "sheets — high-confidence dropper pattern."
+                                        if very_hidden_sheets else ""
+                                    )
+                                ),
+                                evidence={
+                                    "subtype": "inline_xlm",
+                                    "primitive": primitive,
+                                    "part": z.filename,
+                                    "very_hidden_present": bool(very_hidden_sheets),
+                                    "malicious_text": primitive,
+                                },
+                                confidence=0.95 if very_hidden_sheets else 0.85,
+                                module="fast_scan.xlsx.xlm",
+                                mitre_technique="T1059.005",
+                            )
+                        )
 
                     # B.10: WEBSERVICE / FILTERXML formulas make outbound HTTP calls
                     if b"webservice(" in content_lower or b"filterxml(" in content_lower:
