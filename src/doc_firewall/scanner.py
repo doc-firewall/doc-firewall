@@ -778,15 +778,24 @@ class Scanner:
                     )
                     report.findings.extend(det_findings)
                 except asyncio.TimeoutError:
-                    report.add(
-                        Finding(
-                            threat_id=ThreatID.T6_DOS,
-                            severity=Severity.MEDIUM,
-                            title="Detectors timed out",
-                            explain="Detection models exceeded time limit.",
-                            module="stage.detectors",
-                        )
+                    # A timeout of *our own* detector stage is an operational
+                    # event (heavy ML over a large but benign document under
+                    # the strict/full-ML config routinely exceeds the default
+                    # 5 s budget), NOT evidence that the document is a DoS
+                    # attack. Emitting a T6_DOS finding here misclassified
+                    # slow-but-benign files (e.g. multi-page resumes) and
+                    # drove the verdict on empty evidence. Real resource-
+                    # exhaustion is detected with concrete evidence by the
+                    # fast-scan / parse-stage T6 paths and the dedicated DoS
+                    # detectors, which run independently of this catch-all.
+                    # Record the incomplete scan in metadata (same pattern as
+                    # `skipped_detectors`) and warn, so a caller that wants to
+                    # fail closed can inspect it — but do not raise a threat.
+                    log_ctx.warning(
+                        "Detector stage timed out — scan incomplete",
+                        timeout_ms=self.config.limits.detectors_timeout_ms,
                     )
+                    report.metadata["detectors_timed_out"] = True
                 except Exception as e:
                     log_ctx.error("Detectors failed", error=str(e))
 

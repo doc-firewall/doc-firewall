@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-05-17
+
+### Fixed
+
+- **False-positive T6 on slow-but-benign documents** — detector-stage timeout no longer emits a `T6_DOS` finding. Heavy ML scanning of large but benign files (e.g. multi-page resumes under strict/full-ML config) routinely exceeds the default 5 s detector budget; treating that as evidence of a DoS attack produced wrong verdicts on empty evidence. Timeout is now recorded as `report.metadata["detectors_timed_out"] = True` with a structured warning log so callers that want to fail closed can still inspect it. Real resource-exhaustion is detected with concrete evidence by the fast-scan / parse-stage T6 paths and dedicated DoS detectors.
+- **Wasteful Docling subprocess spawning for non-PDF formats** — `convert_with_docling` now skips the subprocess entirely for non-`.pdf` sources. DOCX has always been handled by the fallback parser; spawning the Docling subprocess only for it to reject the format wasted a process spawn + full Docling import and printed Docling's "does not match any allowed format" rejection to stderr on every DOCX scan.
+
 ## [0.4.1] - 2026-05-16
 
 ### Added

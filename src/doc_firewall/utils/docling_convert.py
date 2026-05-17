@@ -450,7 +450,15 @@ def convert_with_docling(
     # Docling's conv.convert() can hang indefinitely on bomb PDFs and cannot be
     # interrupted from a thread (asyncio.wait_for only cancels the future).
     # We isolate it in a subprocess so SIGKILL can terminate it on timeout.
-    if HAS_DOCLING:
+    #
+    # The Docling converter is intentionally restricted to InputFormat.PDF
+    # (see _converter / _docling_subprocess_worker). DOCX is always parsed by
+    # _fallback_docx below, never by Docling. Spawning the Docling subprocess
+    # for a non-PDF only to have Docling reject the format wastes a process
+    # spawn + import and prints Docling's "does not match any allowed format"
+    # rejection straight to stderr. Skip it entirely for non-PDF sources.
+    is_pdf = source.lower().endswith(".pdf")
+    if HAS_DOCLING and is_pdf:
         import multiprocessing as _mp
         import queue as _queue_mod
 
