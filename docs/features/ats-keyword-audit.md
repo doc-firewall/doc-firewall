@@ -164,7 +164,7 @@ ats_keywords:
 **Via custom Aho-Corasick YAML** (extends the multi-layer injection phrase set):
 ```yaml
 # custom_phrases.yaml
-phrases:
+custom_phrases:
   - "your zero-day injection phrase"
   - "another phrase"
 ```

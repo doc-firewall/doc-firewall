@@ -1,14 +1,17 @@
 from __future__ import annotations
-import re
+
+import base64
 import math
 import os
+import re
 from typing import List
-from .base import Detector
+
 from ..analyzers.base import ParsedDocument
 from ..config import ScanConfig
-from ..report import Finding
-from ..enums import ThreatID, Severity
+from ..enums import Severity, ThreatID
 from ..logger import get_logger
+from ..report import Finding
+from .base import Detector
 
 logger = get_logger()
 

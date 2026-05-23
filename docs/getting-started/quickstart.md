@@ -22,7 +22,7 @@ from doc_firewall import scan
 
 report = scan("resume.pdf")
 
-print(f"Verdict: {report.verdict}") # ALLOW, FLAG, or BLOCK
+print(f"Verdict: {report.verdict.name}") # ALLOW, FLAG, or BLOCK
 print(f"Risk Score: {report.risk_score}")
 ```
 
@@ -34,8 +34,8 @@ The `ScanReport` object contains a wealth of information about the scan.
 if report.verdict == "BLOCK":
     print("🚫 Security Alert!")
     for finding in report.findings:
-        print(f"[{finding.threat_id}] {finding.title}")
-        print(f"  Sev: {finding.severity}")
+        print(f"[{finding.threat_id.name}] {finding.title}")
+        print(f"  Sev: {finding.severity.name}")
         print(f"  Explain: {finding.explain}")
         print(f"  Module: {finding.module}")
         if "malicious_text" in finding.evidence:
@@ -61,7 +61,7 @@ import asyncio
 from doc_firewall import Scanner, ScanConfig
 
 async def main():
-    scanner = Scanner(ScanConfig(profile="fast"))
+    scanner = Scanner(ScanConfig(profile="balanced"))
     
     # Non-blocking scan
     report = await scanner.scan_async("large_contract.pdf")

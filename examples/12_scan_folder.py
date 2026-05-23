@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import argparse
 import csv
-import json
 import enum
+import json
+import shutil
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -32,10 +33,15 @@ def finding_to_dict(finding: Any) -> dict[str, Any]:
         return finding
     return getattr(finding, "__dict__", {})
 
+VALID_PROFILES = {"lenient", "balanced", "strict"}
+
+
 def build_scan_config(config_cls: type, profile: str, mode: str) -> Any:
-    # Basic config setup for the example folder scanner
-    # In a real environment, you might merge profile/mode logic
-    return config_cls(enable_antivirus=(mode == "aggressive"))
+    # `profile` selects the threshold/ML preset (lenient|balanced|strict).
+    # `mode` is an example-local switch that only toggles antivirus.
+    if profile not in VALID_PROFILES:
+        profile = "strict"
+    return config_cls(profile=profile, enable_antivirus=(mode == "aggressive"))
 
 
 FIELDNAMES = [
@@ -53,10 +59,40 @@ FIELDNAMES = [
 ]
 
 
-def iter_files(input_dir: Path) -> Iterable[Path]:
+def iter_files(input_dir: Path, exclude_dir: Path | None = None) -> Iterable[Path]:
+    exclude = exclude_dir.resolve() if exclude_dir else None
     for path in sorted(input_dir.rglob("*")):
-        if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS:
-            yield path
+        if not (path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS):
+            continue
+        # Don't rescan files we previously sorted into the output tree.
+        if exclude and exclude in path.resolve().parents:
+            continue
+        yield path
+
+
+# Maps a scan verdict to a destination bucket. Anything not listed here
+# (REVIEW, FLAG, WARN, UNKNOWN, ...) falls through to "suspicious".
+VERDICT_BUCKETS = {
+    "ERROR": "error",
+    "BLOCK": "blocked",
+    "BLOCKED": "blocked",
+    "ALLOW": "clean",
+    "CLEAN": "clean",
+    "PASS": "clean",
+}
+
+
+def bucket_for_verdict(verdict: Any) -> str:
+    return VERDICT_BUCKETS.get(str(verdict).upper(), "suspicious")
+
+
+def sort_file(file_path: Path, base_dir: Path, sorted_dir: Path, verdict: Any) -> str:
+    """Copy file_path into sorted_dir/<bucket>/<relative path>; return the bucket."""
+    bucket = bucket_for_verdict(verdict)
+    dest = sorted_dir / bucket / file_path.relative_to(base_dir)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(file_path, dest)
+    return bucket
 
 
 def text_from(value: Any) -> str:
@@ -235,7 +271,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input_dir", type=Path, help="Folder containing DOCX, PDF, PPTX, and XLSX files.")
     parser.add_argument("--out", default=Path("reports/folder_scan"), type=Path)
-    parser.add_argument("--profile", default="aggressive")
+    parser.add_argument(
+        "--sorted-dir",
+        type=Path,
+        default=None,
+        help="Where to copy files into clean/suspicious/blocked/error buckets "
+        "(default: <out>/sorted). Originals are never modified.",
+    )
+    parser.add_argument("--profile", default="strict", choices=sorted(VALID_PROFILES))
     parser.add_argument("--mode", default="standard", choices=SCAN_MODES)
     args = parser.parse_args()
 
@@ -255,15 +298,24 @@ def main() -> int:
             "Use `pip install \"doc-firewall[ml]\"` for advanced modes or upgrade doc-firewall."
         ) from exc
 
+    sorted_dir = args.sorted_dir or (args.out / "sorted")
+
     scanner = Scanner(config)
     rows: list[dict[str, Any]] = []
     json_reports: list[dict[str, Any]] = []
-    for file_path in iter_files(args.input_dir):
+    bucket_counts: dict[str, int] = {}
+    for file_path in iter_files(args.input_dir, exclude_dir=sorted_dir):
         json_payload, csv_rows = scan_file(scanner, file_path, args.input_dir, args.mode)
         json_reports.append(json_payload)
         rows.extend(csv_rows)
 
+        bucket = sort_file(file_path, args.input_dir, sorted_dir, json_payload.get("verdict"))
+        bucket_counts[bucket] = bucket_counts.get(bucket, 0) + 1
+
     write_reports(rows, json_reports, args.out)
+    if bucket_counts:
+        summary = ", ".join(f"{count} {bucket}" for bucket, count in sorted(bucket_counts.items()))
+        print(f"Copied files into {sorted_dir}: {summary}")
     return 1 if any(row["error"] for row in rows) else 0
 
 

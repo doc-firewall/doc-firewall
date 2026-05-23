@@ -1,12 +1,14 @@
 from __future__ import annotations
+
 import re
 from collections import Counter
 from typing import List
-from .base import Detector
+
 from ..analyzers.base import ParsedDocument
 from ..config import ScanConfig
+from ..enums import Severity, ThreatID
 from ..report import Finding
-from ..enums import ThreatID, Severity
+from .base import Detector
 from .injection_normalizer import normalize_for_matching as _norm_for_matching
 
 # Common English function words that legitimately appear at high frequency.
@@ -88,9 +90,16 @@ class ATSManipulationDetector(Detector):
                             if t.isalpha() and len(t) > 2 and t not in _STOP_WORDS
                         ]
                         tokens.extend(extra)
+            # Always define counter/total: the homoglyph block below uses
+            # them even when this >=25 gate is False. Previously they were
+            # only bound inside this `if`, so a document with <25 raw tokens
+            # but >=25 normalized tokens raised
+            # `UnboundLocalError: cannot access local variable 'counter'`,
+            # which the Scanner caught as a "Detector error" — silently
+            # disabling T9/T3 ATS detection on every short document.
+            counter = Counter(tokens)
+            total = len(tokens)
             if len(tokens) >= 25:
-                counter = Counter(tokens)
-                total = len(tokens)
                 top5 = counter.most_common(5)
                 most_common, top_freq = top5[0]
                 top_ratio = top_freq / total
@@ -184,7 +193,7 @@ class ATSManipulationDetector(Detector):
                 norm_counter = Counter(norm_tokens)
                 norm_most_common, norm_freq = norm_counter.most_common(1)[0]
                 norm_ratio = norm_freq / len(norm_tokens)
-                raw_ratio = counter.get(norm_most_common, 0) / total
+                raw_ratio = counter.get(norm_most_common, 0) / total if total else 0.0
                 # Only flag when normalization reveals significantly higher frequency
                 # and the token appears enough times to exclude short-document noise.
                 if norm_ratio > 0.08 and norm_freq >= 10 and norm_ratio - raw_ratio > 0.03:

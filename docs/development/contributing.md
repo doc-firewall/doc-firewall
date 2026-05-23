@@ -36,14 +36,14 @@ pytest --cov=doc_firewall
 
 ## Code Style
 
-We follow PEP 8 and use `black` for formatting.
+We follow PEP 8 and use `ruff` for both linting and formatting.
 
 ```bash
-# Format code
-black src tests
+# Lint (CI gate)
+ruff check src tests
 
-# Check types
-mypy src
+# Auto-format
+ruff format src tests
 ```
 
 ## Pull Request Process

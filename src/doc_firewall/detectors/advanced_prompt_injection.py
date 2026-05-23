@@ -1,13 +1,60 @@
+import base64
 import logging
 import re
 from typing import List
 
-from .base import Detector
-from .injection_normalizer import normalize_for_matching, has_obfuscation_chars
-from ..report import Finding
-from ..config import ScanConfig
 from ..analyzers.base import ParsedDocument
-from ..enums import ThreatID, Severity
+from ..config import ScanConfig
+from ..enums import Severity, ThreatID
+from ..report import Finding
+from .base import Detector
+from .injection_normalizer import has_obfuscation_chars, normalize_for_matching
+
+# Base64-hidden payloads are a textbook T3/T4 evasion: a short token like
+# `SWdub3JlIHByZXZpb3VzIGluc3RydWN0aW9ucw==` decodes to
+# "Ignore previous instructions". The T7 base64 detector only decodes blobs
+# >=200 chars (entropy-based, tuned for embedded binaries), so short encoded
+# phrases slip through. We decode short base64-looking tokens here and feed
+# the *decoded* text through the same precision-tuned matchers below — this
+# adds NO new false-positive heuristic: a finding only fires if the decoded
+# text itself matches an already-tuned injection pattern. Non-language /
+# binary decodes are dropped.
+_B64_TOKEN_RE = re.compile(r"[A-Za-z0-9+/_-]{16,1024}={0,2}")
+
+
+def _decode_base64_segments(
+    raw_text: str, *, max_tokens: int = 64, max_total: int = 20_000
+) -> str:
+    if not raw_text or len(raw_text) > 2_000_000:
+        return ""
+    out: List[str] = []
+    total = 0
+    for m in _B64_TOKEN_RE.finditer(raw_text):
+        if len(out) >= max_tokens or total >= max_total:
+            break
+        tok = m.group(0)
+        for variant in (tok, tok.replace("-", "+").replace("_", "/")):
+            s = variant.rstrip("=")
+            s += "=" * ((-len(s)) % 4)
+            try:
+                dec = base64.b64decode(s, validate=False)
+            except Exception:
+                continue
+            if len(dec) < 6:
+                continue
+            try:
+                txt = dec.decode("ascii", errors="strict")
+            except Exception:
+                continue
+            # Keep only language-like decodes (drops IDs, hashes, binary):
+            # mostly printable AND contains alphabetic words.
+            printable = sum(1 for c in txt if c.isprintable() or c in " \t")
+            if printable / len(txt) < 0.9 or not any(c.isalpha() for c in txt):
+                continue
+            out.append(txt)
+            total += len(txt)
+            break
+    return " ".join(out)
 
 
 # F.2: generate edit-distance-1 neighbours for ASCII English injection phrases.
@@ -517,6 +564,14 @@ class AdvancedPromptInjectionDetector(Detector):
         # normalized form regardless.
         text_norm = normalize_for_matching(raw_text)
         had_obfuscation = has_obfuscation_chars(raw_text)
+
+        # Decode base64-hidden payloads so the SAME tuned matchers below see
+        # them. Appended (not replacing) so normal text matching is unaffected;
+        # only printable-ASCII language-like decodes are added, so this adds no
+        # new false-positive surface.
+        _b64_plain = _decode_base64_segments(raw_text)
+        if _b64_plain:
+            text_norm = text_norm + "\n" + normalize_for_matching(_b64_plain)
 
         # ── Layer 1: Aho-Corasick phrase matcher ─────────────────────────────
         if config.enable_advanced_ahocorasick:

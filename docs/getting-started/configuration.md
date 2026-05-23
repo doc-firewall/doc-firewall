@@ -178,7 +178,7 @@ custom_phrases:
 config = ScanConfig(
     enable_yara=True,
 
-    # Include the 30+ built-in malware family rules (Emotet, TrickBot, Dridex,
+    # Include the 53 built-in malware family rules (Emotet, TrickBot, Dridex,
     # PDF heap-spray exploits, RTF Equation Editor RCE, polyglot files, etc.)
     enable_builtin_yara_rules=True,
 
@@ -341,7 +341,7 @@ Pillow is optional — if not installed, LSB analysis is silently skipped; the o
 ```yaml
 thresholds:
   deep_scan_trigger: 0.20  # Risk score to trigger deep parsing (0.0–1.0)
-  flag: 0.35               # Return VERDICT=FLAG
+  flag: 0.25               # Return VERDICT=FLAG
   block: 0.70              # Return VERDICT=BLOCK
 
 limits:

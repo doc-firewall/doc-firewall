@@ -243,7 +243,7 @@ config = ScanConfig(
 
     # ── Security features (opt-in) ──────────────────────────────────────────
     enable_yara=True,
-    enable_builtin_yara_rules=True,     # Include 30+ built-in malware family rules
+    enable_builtin_yara_rules=True,     # Include 53 built-in malware family rules
     # yara_rules_path="/etc/docfw/custom.yar",  # Layer in your own rules
 
     enable_steganography_checks=True,   # LSB, metadata entropy, PDF whitespace injection
