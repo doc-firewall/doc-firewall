@@ -15,7 +15,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../src"
 from doc_firewall import Scanner, ScanConfig
 
 def main():
-    # Define a custom configuration with controls for all Threat IDs (T1-T9)
+    # Define a custom configuration with controls for all Threat IDs (T1-T12)
     config = ScanConfig(
         # T1: Malware / Virus
         enable_antivirus=False,  # Requires ClamAV or VirusTotal key
@@ -35,7 +35,13 @@ def main():
         enable_metadata_checks=True,
         # T9: ATS Manipulation (White text, invisible chars)
         enable_ats_manipulation_checks=True,
-        
+        # T10: Indirect / Multi-Hop Injection (URLs, external refs)
+        enable_indirect_injection=True,
+        # T11: RAG / Knowledge-Base Poisoning (chunk-boundary anchors)
+        enable_rag_poisoning=True,
+        # T12: Social Engineering (crypto / gift-card / tech-support lures)
+        enable_social_engineering=True,
+
         # Additional Privacy Checks
         enable_pii_checks=True,
         enable_secrets_checks=False,

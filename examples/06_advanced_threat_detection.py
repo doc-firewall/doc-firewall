@@ -90,7 +90,7 @@ def main():
     scan_dataset_file(
         "samples/T4_0000.pdf", 
         "T4 Prompt Injection (PDF)",
-        config_overrides={"profile": "aggressive"} # Often requires stricter checks
+        config_overrides={"profile": "strict"} # 'strict' lowers thresholds + enables all ML detectors
     )
     
     # --- Section 2: ATS Manipulation ---

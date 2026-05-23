@@ -155,7 +155,7 @@ config = ScanConfig(
 
     # ── YARA ─────────────────────────────────────────────────────────────────
     enable_yara=True,
-    enable_builtin_yara_rules=True,           # 30+ built-in malware rules
+    enable_builtin_yara_rules=True,           # 53 built-in malware rules
     yara_rules_path="path/to/custom.yar",     # optional custom rules layered on top
 
     # ── Custom injection phrases ─────────────────────────────────────────────

@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-05-23
+
+### Fixed
+
+- **PDF text false-negatives (~40 documents)** — when Docling returned truncated/partial text for a PDF, the regex-fallback extraction was discarded. The PDF parser now unions the fallback text with the Docling output (preferring the longer / non-empty result), so injection and embedded-payload content past Docling's truncation point is no longer missed.
+- **T7 base64-embedded payloads silently undetected** — `embedded_payload.py` was missing `import base64`; every `base64.b64decode` call raised `NameError` that a bare `except` swallowed, making the entire decode-and-flag path dead code. Import restored.
+- **T9 / T3 homoglyph detection silently disabled** — `ats_manipulation.py` raised `UnboundLocalError: counter` in the homoglyph branch (`counter` / `total` referenced before assignment). Hoisted above the guarding block.
+- **First scan bypassed all deep-scan detectors** — one-time cold-start model/automaton initialization pushed the first document past the 5 s detector-stage budget, so it returned with `detectors_timed_out` and zero deep findings. The detector-stage timeout default is raised to absorb warm-up (see Changed).
+
+### Changed
+
+- **Short base64 segments now decoded before T4 / T3 matching** — `advanced_prompt_injection.py` decodes embedded base64 tokens and appends the plaintext to the normalized text before matching, closing a standard-mode T3 obfuscation gap (previously only the ML / defense-in-depth path caught it). Reuses the existing tuned matchers — no new false-positive heuristic.
+- `limits.detectors_timeout_ms` default raised 5000 → 30000 ms.
+
+### Documentation
+
+- Corrected all bundled `examples/` scripts — invalid `Finding.rule_id`, and rebuilt the examples index for T1–T12.
+- Corrected the published docs: invalid `profile="fast"`, JSON `"file"` → `"file_path"`, non-existent `T7_SENSITIVE_PII` policy weight → `T8_METADATA_INJECTION`, wrong custom-phrase YAML key (`phrases:` → `custom_phrases:`), default `flag` threshold (0.35 → 0.25), `black`/`mypy` → `ruff`, stale CLI output sample, and YARA rule count (30+ → 53).
+
 ## [0.4.2] - 2026-05-17
 
 ### Fixed

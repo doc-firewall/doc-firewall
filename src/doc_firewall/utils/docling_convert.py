@@ -1,9 +1,10 @@
 from __future__ import annotations
+
 import os
-import zipfile
 import re
+import zipfile
 from typing import Any, Dict, Tuple
-from functools import lru_cache
+
 from ..logger import get_logger
 
 
@@ -23,9 +24,9 @@ def _docling_subprocess_worker(
     os.environ["DOCLING_DISABLE_OCR"] = "1"
     os.environ["RAPIDOCR_DISABLE_AUTO_DOWNLOAD"] = "1"
     try:
-        from docling.document_converter import DocumentConverter, PdfFormatOption
-        from docling.datamodel.pipeline_options import PdfPipelineOptions
         from docling.datamodel.document import InputFormat
+        from docling.datamodel.pipeline_options import PdfPipelineOptions
+        from docling.document_converter import DocumentConverter, PdfFormatOption
 
         pipeline_options = PdfPipelineOptions()
         pipeline_options.do_ocr = False
@@ -65,9 +66,9 @@ os.environ["DOCLING_DISABLE_OCR"] = "1"
 os.environ["RAPIDOCR_DISABLE_AUTO_DOWNLOAD"] = "1"
 
 try:
-    from docling.document_converter import DocumentConverter, PdfFormatOption
-    from docling.datamodel.pipeline_options import PdfPipelineOptions
     from docling.datamodel.document import InputFormat
+    from docling.datamodel.pipeline_options import PdfPipelineOptions
+    from docling.document_converter import DocumentConverter, PdfFormatOption
 
     HAS_DOCLING = True
 except ImportError:
@@ -520,10 +521,29 @@ def convert_with_docling(
             if k not in meta or not meta[k]:
                 meta[k] = v
 
+        # SECURITY-SCAN TEXT = UNION of Docling's rendered text and the
+        # fallback regex extraction.
+        #
+        # Docling renders layout text, but on minimal / hand-crafted PDFs it
+        # silently truncates or skips raw content-stream string literals
+        # (observed: a ~1 KB PDF whose content stream holds an EICAR string
+        # decoded to only the first ~110 chars, dropping the payload). The
+        # previous logic only promoted the fallback text when Docling
+        # returned *empty* text, so a truncated-but-non-empty Docling result
+        # caused payloads (EICAR / macro indicators / Base64) to be invisible
+        # to every detector — a systemic false-negative on PDFs. `_fallback_pdf`'s
+        # regex captures those raw string literals. For a security scanner,
+        # recall dominates, so scan both: append the fallback text whenever it
+        # carries content Docling did not fully capture.
+        fb = fallback_text.strip()
+        if fb and (not text.strip() or len(fb) > len(text.strip())):
+            text = (text + "\n" + fallback_text) if text.strip() else fallback_text
+
         # CLEANUP: Remove Metadata Payloads from Text (Fixes T8/T4 False Positives)
         # Ensure that values found in metadata (likely T8 payloads) are not present
-        # in the body text.
-        # This acts as a second layer of defense if Docling extracted them as text.
+        # in the body text. Applied AFTER the union so it covers the combined
+        # text. This acts as a second layer of defense if Docling or the
+        # fallback extracted them as body text.
         exclusion_list = set()
         for k, v in fallback_meta.items():
             # Only filter standard metadata fields, not internal flags
@@ -541,13 +561,5 @@ def convert_with_docling(
         for val in exclusion_list:
             if len(val) > 4 and val in text:  # Limit short string removal to avoid FP
                 text = text.replace(val, "")
-
-        # If Docling succeeded but extracted no text, promote the fallback text so
-        # the deep scan can still run pattern-matching on the document body.
-        # This occurs on simple PDFs where Docling processes the structure but
-        # finds no text objects (content lives in plain PDF string literals that
-        # Docling skips, while _fallback_pdf's regex finds them directly).
-        if not text.strip() and fallback_text.strip():
-            text = fallback_text
 
     return text, meta

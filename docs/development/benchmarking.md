@@ -92,6 +92,6 @@ Where:
 To profile code hotspots:
 
 ```bash
-python -m cProfile -o output.pstats scripts/run_scan.py
+python -m cProfile -o output.pstats scripts/benchmark_throughput.py
 snakeviz output.pstats
 ```

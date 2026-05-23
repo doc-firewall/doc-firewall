@@ -1,5 +1,7 @@
 from __future__ import annotations
-from typing import Optional, Dict, Any
+
+from typing import Any, Dict, Optional
+
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -39,7 +41,18 @@ class Limits(BaseSettings):
     fast_scan_timeout_ms: int = 8000
     parse_timeout_ms: int = 15000
     format_checks_timeout_ms: int = 5000
-    detectors_timeout_ms: int = 5000
+    # 30 s, not 5 s: the detector stage now includes lazily-imported heavy
+    # ML (torch/transformers BERT sliding-window, sentence-transformers
+    # semantic NN), YARA rule compilation, and the F.2 Aho-Corasick build.
+    # On the FIRST scan of a fresh process all of that one-time cost lands
+    # in this stage, routinely pushing a cold-start full-ML scan just over a
+    # 5 s budget (~5004 ms observed). The stage would then be cancelled with
+    # zero findings, so the first document submitted to a Scanner silently
+    # bypassed every detector (flaky across machines/Python versions). A
+    # genuine resource-exhaustion document is still caught earlier by the
+    # fast-scan / parse-stage T6 paths, which run before this stage, so a
+    # generous detector budget does not weaken DoS protection.
+    detectors_timeout_ms: int = 30000
     antivirus_timeout_ms: int = 10000
     # Hard process-level kill for Docling PDF conversion — must be shorter than
     # parse_timeout_ms so the thread can clean up before asyncio cancels it.
