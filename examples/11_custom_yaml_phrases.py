@@ -1,4 +1,4 @@
-from doc_firewall import Scanner, ScanConfig
+from doc_firewall import ScanConfig, Scanner
 
 # Configure scanner with a custom YAML file containing zero-day phrases
 config = ScanConfig(
@@ -17,5 +17,5 @@ print("-" * 30)
 print(f"Verdict:    {report.verdict}")
 print(f"Risk Score: {report.risk_score:.2f}")
 for f in report.findings:
-    if "T4" in f.rule_id:
-        print(f"[{f.severity}] {f.title}: {f.explain[:100]}...")
+    if f.threat_id.name.startswith("T4"):
+        print(f"[{f.severity.name}] {f.title}: {f.explain[:100]}...")

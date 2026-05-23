@@ -1,46 +1,54 @@
 # DocFirewall Examples
 
-This folder contains verified examples of how to integrate and use the `doc_firewall` library in your applications.
+This folder contains verified examples of how to integrate and use the `doc_firewall` library in your applications. Every script runs against the bundled fixtures in [`samples/`](samples/) (or generates its own), so no external dataset is required.
+
+DocFirewall covers the full **T1–T12** threat vocabulary:
+
+| Code | Threat | Code | Threat |
+|---|---|---|---|
+| T1 | Malware / Virus | T7 | Embedded Payloads |
+| T2 | Active Content | T8 | Metadata Injection / PII |
+| T3 | Obfuscation | T9 | ATS Manipulation |
+| T4 | Prompt Injection | T10 | Indirect / Multi-Hop Injection |
+| T5 | Ranking Manipulation | T11 | RAG / KB Poisoning |
+| T6 | DoS / Resource Exhaustion | T12 | Social Engineering |
 
 ## Prerequisites
-Ensure `doc_firewall` is installed or the `src` folder is in your `PYTHONPATH`.
+
+Ensure `doc_firewall` is installed, or run the examples from the project root (each script adds `../src` to `PYTHONPATH` automatically).
 
 ```bash
-pip install -e .
+pip install -e .            # base
+pip install -e ".[ml]"      # adds BERT / sentence-transformers / YARA for examples 8 & 9
 ```
 
 ## Examples
 
-### 1. [Basic Usage](01_basic_scan.py)
-The simplest way to scan a file using default settings.
+| # | File | What it shows |
+|---|---|---|
+| 1 | [01_basic_scan.py](01_basic_scan.py) | Simplest one-call `scan()` with default settings. |
+| 2 | [02_custom_config.py](02_custom_config.py) | Per-threat toggles (T1–T12), custom thresholds, file limits, profiles. |
+| 3 | [03_json_output.py](03_json_output.py) | Serialize `ScanReport` to JSON for APIs / logging. |
+| 4 | [04_yaml_config_scan.py](04_yaml_config_scan.py) | Load `ScanConfig` from a YAML file instead of code. |
+| 5 | [05_custom_antivirus.py](05_custom_antivirus.py) | T1 antivirus integration: ClamAV, VirusTotal, generic CLI. |
+| 6 | [06_advanced_threat_detection.py](06_advanced_threat_detection.py) | Multi-vector scan (T4 / T9 / T2) across real adversarial samples. |
+| 7 | [07_scan_pptx_xlsx.py](07_scan_pptx_xlsx.py) | PPTX & XLSX detection — macros, DDE, external refs, DoS, metadata. |
+| 8 | [08_advanced_ml_scanners.py](08_advanced_ml_scanners.py) | Isolate the advanced ML modules (BERT, TF-IDF, Aho-Corasick, entropy). |
+| 9 | [09_recommended_advanced_scan.py](09_recommended_advanced_scan.py) | Recommended max-security config: traditional + ML, `strict` profile. |
+| 11 | [11_custom_yaml_phrases.py](11_custom_yaml_phrases.py) | Feed custom zero-day phrases via a YAML Aho-Corasick list. |
+| 12 | [12_scan_folder.py](12_scan_folder.py) | Bulk-scan a folder → flat CSV + API-style JSON reports. |
+
 ```bash
 python examples/01_basic_scan.py
+python examples/12_scan_folder.py examples/samples --out reports/folder_scan
 ```
 
-### 2. [Custom Configuration](02_custom_config.py)
-How to configure specific checks, change sensitivity thresholds, and enforce file limits.
-```bash
-python examples/02_custom_config.py
-```
+> Valid `profile` values are `lenient`, `balanced`, and `strict` only. `strict`
+> lowers thresholds and enables all ML/YARA detectors for maximum recall.
 
-### 3. [JSON Output / API Integration](03_json_output.py)
-How to serialize the `ScanReport` to JSON, suitable for logging or returning responses in a REST API.
-```bash
-python examples/03_json_output.py
-```
+## Advanced topics in tests/scripts
 
-### 8. [Advanced ML Scanners](08_advanced_ml_scanners.py)
-How to disable traditional scanners and enable the sophisticated local Machine Learning modules (BERT, TF-IDF, Aho-Corasick) for deeper heuristic threat detection.
-```bash
-python examples/08_advanced_ml_scanners.py
-```
-
-### 9. [Recommended Advanced Scan](09_recommended_advanced_scan.py)
-The recommended configuration for maximum security, enabling both the traditional format-based parsers and the new Advanced local Machine Learning modules collectively for comprehensive defense-in-depth protection.
-```bash
-python examples/09_recommended_advanced_scan.py
-```
-
-## Advanced Topics available in tests/scripts
-- **Antivirus Integration**: See `scripts/test_antivirus_docker.py`.
-- **Bulk Scanning**: See `scripts/validate_with_doc_firewall.py`.
+- **Antivirus in Docker**: `scripts/test_antivirus_docker.py`
+- **Bulk dataset validation**: `scripts/validate_with_doc_firewall.py`
+</content>
+</invoke>
