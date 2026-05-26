@@ -669,7 +669,119 @@ class TestBenignCorpus(unittest.TestCase):
             "seo_strategy_document",
         )
 
-    # ── 18. Academic paper discussing ATS systems (legitimate T9 vocab) ────
+    # ── 18a. Real-world resume FP regressions ──────────────────────────────
+    #
+    # These exercise the false-positive surface we hit on a real resume
+    # dataset (almost 100% FLAG/BLOCK rate). Each must produce zero findings
+    # on the balanced profile.
+
+    def test_resume_with_contact_hyperlinks(self) -> None:
+        # mailto: + https://linkedin.com + https://github.com — every resume
+        # has these. Hyperlinks alone must never trigger ranking/ATS findings.
+        self._assert_clean(
+            """
+            Liam Patel — Full Stack Java Developer
+
+            Contact
+            Email: liam.patel@example.com
+            LinkedIn: https://linkedin.com/in/liam-patel-9384
+            GitHub: https://github.com/liampatel
+            Phone: +1 (555) 234-9810
+
+            Professional Summary
+            Engineer who delivers meaningful impact as a Full Stack Java
+            Developer. Eight years of experience designing scalable backend
+            systems and modern web frontends across the JVM ecosystem and
+            React. Comfortable owning a service end-to-end from design
+            through on-call rotation.
+
+            Work Experience
+
+            Senior Engineer — Acme Inc (2022–present)
+            Led the migration of a monolithic Java application to a set of
+            Spring Boot microservices on Kubernetes. Designed the rollout
+            plan, mentored two engineers, and shipped without downtime.
+
+            Engineer — Helio Labs (2018–2022)
+            Built and maintained order-management services in Java and
+            Kotlin. Collaborated with product on roadmap planning and led
+            interview loops for backend candidates.
+
+            Education
+            B.Sc. Computer Science — University of Lisbon (2017)
+
+            Technical Skills
+            Languages: Java, Kotlin, TypeScript, SQL
+            Frameworks: Spring Boot, React, Hibernate, Kafka
+            Tools: Docker, Kubernetes, Terraform, Git, GitHub Actions
+            """,
+            "resume_with_hyperlinks",
+        )
+
+    def test_pdf_extracted_text_with_structural_tokens(self) -> None:
+        # Real PDFs occasionally leak structural keywords (endobj, endstream,
+        # xref, etc.) into Docling-extracted text when fonts use embedded
+        # CMaps. These tokens must not count toward keyword-stuffing
+        # frequency checks.
+        self._assert_clean(
+            """
+            Software Engineer Position — Job Description
+
+            We are looking for a backend engineer to join the platform team.
+            The role focuses on reliability, performance, and developer
+            experience across our microservices. You will own services from
+            design through on-call ownership.
+
+            Responsibilities include designing distributed systems, writing
+            clean and tested code, and mentoring teammates. We work in Go
+            and Python on AWS infrastructure.
+
+            obj endobj obj endobj obj endobj obj endobj obj endobj
+            stream endstream stream endstream stream endstream
+            xref trailer startxref obj endobj obj endobj obj endobj
+            beginbfchar endbfchar beginbfchar endbfchar
+            obj endobj obj endobj obj endobj obj endobj obj endobj
+            obj endobj obj endobj obj endobj obj endobj obj endobj
+
+            Compensation is competitive. Benefits include comprehensive
+            health coverage, retirement matching, and an annual learning
+            budget for professional development.
+            """,
+            "pdf_structural_token_leakage",
+        )
+
+    def test_pdf_extracted_text_with_numeric_coordinate_run(self) -> None:
+        # Long runs of zero or numeric tokens from PDF graphics-state
+        # matrices ("0 0 612 792 ...") must not fire T9 repeated-sequence.
+        self._assert_clean(
+            """
+            Resume — Engineering Manager
+
+            Strategic leader with experience scaling engineering teams from
+            five to fifty across several quarters. Focus on hiring,
+            coaching, and creating environments where engineers do their
+            best work. Comfortable balancing roadmap delivery with
+            investment in platform health.
+
+            Recent Roles
+            Director of Engineering — Northwind Systems (2023–present)
+            Engineering Manager — Beacon Software (2019–2023)
+            Tech Lead — Vertex Cloud (2016–2019)
+
+            0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+            0 0 612 792 0 0 1 0 0 1 0 0 0 0 612 792 0 0 1 0 0 1 0 0
+            0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+
+            Selected Achievements
+            Scaled the data platform organisation from eight to twenty-two
+            engineers across two years while maintaining strong engagement
+            scores. Led incident-response improvements that cut median
+            time-to-resolution roughly in half year-over-year.
+            """,
+            "pdf_numeric_coordinate_run",
+        )
+
+    # ── 19. Academic paper discussing ATS systems (legitimate T9 vocab) ────
     #
     # R4 companion: legitimate discussion of ATS manipulation in an academic
     # context should not trigger T9 or T5 detectors.

@@ -16,6 +16,27 @@ STEALTH_CHARS = [
     (b"\xe2\x80\xae", "Right-to-Left Override"),
 ]
 
+# Regexes for filtering external-relationship targets in fast_scan_docx.
+# Mirror docx/external_refs.py — kept here to avoid circular import.
+_REL_TARGET_RE = re.compile(rb'Target="([^"]+)"[^>]*TargetMode="External"|TargetMode="External"[^>]*Target="([^"]+)"')
+_REL_BENIGN_SCHEME_RE = re.compile(rb"^(?:https?|mailto|tel|sms):", re.IGNORECASE)
+_REL_IP_LITERAL_RE = re.compile(rb"^https?://(?:\d{1,3}\.){3}\d{1,3}", re.IGNORECASE)
+_REL_SUSPICIOUS_SCHEME_RE = re.compile(rb"^(?:javascript|data|vbscript|file|jar|ftp|smb):", re.IGNORECASE)
+
+
+def _first_suspicious_rel_target(rel_content: bytes) -> str | None:
+    """Return the first external-rel Target that uses a non-standard scheme,
+    an IP-literal host, or is scheme-less. None if all targets are benign."""
+    for m in _REL_TARGET_RE.finditer(rel_content):
+        target = (m.group(1) or m.group(2) or b"").strip()
+        if not target:
+            continue
+        if _REL_SUSPICIOUS_SCHEME_RE.match(target) or _REL_IP_LITERAL_RE.match(target):
+            return target.decode("latin-1", errors="replace")[:300]
+        if not _REL_BENIGN_SCHEME_RE.match(target) and b"://" not in target:
+            return target.decode("latin-1", errors="replace")[:300]
+    return None
+
 # ── Hidden-text XML patterns (H1) ────────────────────────────────────────────
 # All patterns applied to raw document.xml bytes.
 
@@ -301,24 +322,36 @@ def fast_scan_docx(file_path: str, config: ScanConfig) -> List[Finding]:
                             "Error reading embedded archive %s: %s", z.filename, _e
                         )
 
-            # External Relationships
+            # External Relationships — only flag when the target uses a
+            # non-standard scheme (javascript:/data:/file:/vbscript:/jar:/
+            # ftp:/smb:), an IP-literal host, or is scheme-less. Plain
+            # http(s)/mailto/tel hyperlinks (resume contact links, embedded
+            # https images) are not flagged. The deep-scan path in
+            # docx/external_refs.py performs full XML parsing for the deep
+            # report; this fast path is a regex guard.
             if z.filename.endswith(".rels"):
                 try:
                     with zf.open(z) as f:
-                        rel_content = f.read(512 * 1024)  # Read up to 512KB
-                        if b'TargetMode="External"' in rel_content:
+                        rel_content = f.read(512 * 1024)
+                    if b'TargetMode="External"' in rel_content:
+                        suspicious_target = _first_suspicious_rel_target(rel_content)
+                        if suspicious_target:
                             findings.append(
                                 Finding(
                                     threat_id=ThreatID.T2_ACTIVE_CONTENT,
-                                    severity=Severity.MEDIUM,
-                                    title="DOCX External Relationship Found",
+                                    severity=Severity.HIGH,
+                                    title="DOCX External Relationship With Suspicious Target",
                                     explain=(
-                                        "Found 'TargetMode=\"External\"' "
-                                        f"in {z.filename}, "
-                                        "indicating external content fetch."
+                                        f"In {z.filename}, an external "
+                                        "relationship targets a non-standard "
+                                        "scheme or IP-literal host."
                                     ),
-                                    evidence={"filename": z.filename},
-                                    confidence=0.65,
+                                    evidence={
+                                        "filename": z.filename,
+                                        "target": suspicious_target,
+                                        "malicious_text": suspicious_target[:250],
+                                    },
+                                    confidence=0.85,
                                     module="fast_scan.docx.rels",
                                 )
                             )

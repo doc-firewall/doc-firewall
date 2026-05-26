@@ -10,6 +10,7 @@ def parse_pdf(path: str, config: ScanConfig) -> ParsedDocument:
         max_num_pages=config.limits.max_pages,
         max_file_size_bytes=config.limits.max_mb * 1024 * 1024,
         timeout_s=float(config.limits.docling_subprocess_timeout_s),
+        device=config.limits.docling_device,
     )
     # d is the merged metadata
     # Map pdf_comments into standard comments key for unified detector processing

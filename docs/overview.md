@@ -7,9 +7,9 @@ description: Overview of DocFirewall's 12 threat vectors (T1–T12), multi-layer
 
 <div align="center" markdown="1">
 
-![DocFirewall Logo](assets/logo_text.png)
+![DocFirewall Logo](assets/logo_text.webp)
 
-**Secure Document Intake for AI Pipelines**
+**Document Security Scanner for AI & RAG Pipelines**
 
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/)

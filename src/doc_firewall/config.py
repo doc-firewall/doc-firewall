@@ -1,9 +1,24 @@
 from __future__ import annotations
 
+import sys
 from typing import Any, Dict, Optional
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _default_docling_device() -> str:
+    """Pick a safe default Docling device per platform.
+
+    macOS (Apple Silicon or Intel): "cpu" — Docling's auto-detection would pick
+    MPS on Apple Silicon, but its layout model uses float64 ops that MPS
+    rejects with "Cannot convert a MPS Tensor to float64 dtype". CPU
+    inference is fast enough for our use (OCR + table structure disabled).
+
+    Everywhere else (Linux / Windows): "auto" — lets Docling pick CUDA / XPU
+    when available, falling back to CPU on machines without a GPU.
+    """
+    return "cpu" if sys.platform == "darwin" else "auto"
 
 
 class Limits(BaseSettings):
@@ -38,26 +53,33 @@ class Limits(BaseSettings):
     # Fast scan limits
     fast_pdf_token_scan_mb: int = 2
 
-    fast_scan_timeout_ms: int = 8000
-    parse_timeout_ms: int = 15000
-    format_checks_timeout_ms: int = 5000
-    # 30 s, not 5 s: the detector stage now includes lazily-imported heavy
-    # ML (torch/transformers BERT sliding-window, sentence-transformers
-    # semantic NN), YARA rule compilation, and the F.2 Aho-Corasick build.
-    # On the FIRST scan of a fresh process all of that one-time cost lands
-    # in this stage, routinely pushing a cold-start full-ML scan just over a
-    # 5 s budget (~5004 ms observed). The stage would then be cancelled with
-    # zero findings, so the first document submitted to a Scanner silently
-    # bypassed every detector (flaky across machines/Python versions). A
-    # genuine resource-exhaustion document is still caught earlier by the
-    # fast-scan / parse-stage T6 paths, which run before this stage, so a
-    # generous detector budget does not weaken DoS protection.
-    detectors_timeout_ms: int = 30000
-    antivirus_timeout_ms: int = 10000
-    # Hard process-level kill for Docling PDF conversion — must be shorter than
-    # parse_timeout_ms so the thread can clean up before asyncio cancels it.
+    # 5-minute per-stage timeouts. Real resumes / contracts / large PDFs in
+    # production routinely take 30–90 s when the strict profile enables BERT
+    # + sentence-transformers + YARA; the old 5–15 s budgets caused
+    # operational T6_DOS findings on benign documents. Genuine bombs are
+    # still caught by the dedicated DoS detectors with concrete evidence.
+    fast_scan_timeout_ms: int = 300000
+    parse_timeout_ms: int = 300000
+    format_checks_timeout_ms: int = 300000
+    detectors_timeout_ms: int = 300000
+    antivirus_timeout_ms: int = 300000
+    # Hard process-level kill for Docling PDF conversion — must be shorter
+    # than parse_timeout_ms so the thread can clean up before asyncio cancels
+    # it. Kept ~10% below parse_timeout_ms.
     docling_subprocess_timeout_s: int = Field(
-        12, description="Seconds before the Docling subprocess is hard-killed"
+        270, description="Seconds before the Docling subprocess is hard-killed"
+    )
+    # Default Docling device is platform-aware (see _default_docling_device):
+    # macOS → "cpu" to avoid the MPS float64 crash; everywhere else → "auto"
+    # so CUDA/XPU boxes get GPU acceleration automatically. Override per
+    # process with DOC_FIREWALL_LIMITS_DOCLING_DEVICE=… or programmatically
+    # via ScanConfig(limits={"docling_device": "..."}).
+    docling_device: str = Field(
+        default_factory=_default_docling_device,
+        description=(
+            "Device for Docling model inference: cpu | auto | cuda | cuda:N | mps | xpu. "
+            "Defaults to cpu on macOS (MPS has float64 issues) and auto elsewhere."
+        ),
     )
 
     # Circuit breaker — per-detector failure isolation

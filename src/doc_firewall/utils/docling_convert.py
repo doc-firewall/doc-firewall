@@ -13,17 +13,30 @@ def _docling_subprocess_worker(
     max_num_pages: int,
     max_file_size_bytes: int,
     result_queue: Any,
+    device: str = "cpu",
 ) -> None:
     """Subprocess worker for Docling PDF conversion with process-level isolation.
 
     Must be a module-level (non-nested) function so multiprocessing 'spawn'
     can pickle and import it in the child process.
+
+    `device` is forwarded to Docling's AcceleratorOptions. Default "cpu"
+    avoids the MPS float64-unsupported error on Apple Silicon (Docling's
+    layout model uses float64 ops that MPS rejects). Pass "auto" / "cuda" /
+    "mps" / "xpu" to opt back into a GPU device.
     """
     # Re-apply env guards — spawn creates a fresh interpreter, parent env is
     # not inherited on all platforms.
     os.environ["DOCLING_DISABLE_OCR"] = "1"
     os.environ["RAPIDOCR_DISABLE_AUTO_DOWNLOAD"] = "1"
+    # Set DOCLING_DEVICE so any code path inside Docling that re-reads the
+    # env (rather than the AcceleratorOptions object we pass) also sees CPU.
+    os.environ["DOCLING_DEVICE"] = device
     try:
+        from docling.datamodel.accelerator_options import (
+            AcceleratorDevice,
+            AcceleratorOptions,
+        )
         from docling.datamodel.document import InputFormat
         from docling.datamodel.pipeline_options import PdfPipelineOptions
         from docling.document_converter import DocumentConverter, PdfFormatOption
@@ -32,6 +45,7 @@ def _docling_subprocess_worker(
         pipeline_options.do_ocr = False
         pipeline_options.do_table_structure = False
         pipeline_options.table_structure_options.do_cell_matching = False
+        pipeline_options.accelerator_options = AcceleratorOptions(device=device)
 
         conv = DocumentConverter(
             allowed_formats=[InputFormat.PDF],
@@ -76,10 +90,17 @@ except ImportError:
 
 if HAS_DOCLING:
     _cached_converter = None
-    
-    def _converter() -> "DocumentConverter":
-        global _cached_converter
-        if _cached_converter is None:
+    _cached_converter_device: str | None = None
+
+    def _converter(device: str = "cpu") -> "DocumentConverter":
+        """Lazy-built, device-keyed Docling converter cache.
+
+        The cache key includes the device so changing `docling_device` at
+        runtime rebuilds the converter rather than silently reusing one
+        constructed with the previous device.
+        """
+        global _cached_converter, _cached_converter_device
+        if _cached_converter is None or _cached_converter_device != device:
             import logging
             logging.getLogger("RapidOCR").setLevel(logging.WARNING)
             try:
@@ -87,11 +108,14 @@ if HAS_DOCLING:
                 logging.getLogger("rapidocr_onnxruntime").setLevel(logging.WARNING)
             except Exception:
                 pass
-                
+
+            from docling.datamodel.accelerator_options import AcceleratorOptions
+
             pipeline_options = PdfPipelineOptions()
             pipeline_options.do_ocr = False
             pipeline_options.do_table_structure = False
             pipeline_options.table_structure_options.do_cell_matching = False
+            pipeline_options.accelerator_options = AcceleratorOptions(device=device)
 
             # Key must be InputFormat.PDF (enum), not PdfFormatOption (class).
             # Using the wrong key causes the custom option to be silently ignored,
@@ -105,6 +129,7 @@ if HAS_DOCLING:
                     InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
                 }
             )
+            _cached_converter_device = device
         return _cached_converter
 
     import atexit
@@ -441,8 +466,16 @@ def convert_with_docling(
     max_num_pages: int,
     max_file_size_bytes: int,
     timeout_s: float = 30.0,
+    device: str = "cpu",
 ) -> Tuple[str, Dict[str, Any]]:
-    logger.debug("convert_with_docling called", source=source)
+    """Parse a PDF/DOCX via Docling (subprocess-isolated) + fallback regex.
+
+    `device` is forwarded to Docling's AcceleratorOptions. Default "cpu"
+    avoids the MPS float64-unsupported error on Apple Silicon (Docling's
+    layout model uses float64 ops that MPS rejects). Pass "auto" / "cuda" /
+    "mps" / "xpu" to opt back into a GPU device.
+    """
+    logger.debug("convert_with_docling called", source=source, device=device)
     text = ""
     meta = {}
     docling_success = False
@@ -467,7 +500,7 @@ def convert_with_docling(
         result_q = _ctx.Queue()
         proc = _ctx.Process(
             target=_docling_subprocess_worker,
-            args=(source, max_num_pages, max_file_size_bytes, result_q),
+            args=(source, max_num_pages, max_file_size_bytes, result_q, device),
             daemon=True,
         )
         proc.start()
