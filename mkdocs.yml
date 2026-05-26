@@ -1,5 +1,5 @@
 site_name: DocFirewall
-site_description: "Open-source Python library for secure document intake. Detects prompt injection, malware, and data exfiltration in PDF, DOCX, PPTX, XLSX, RTF, HTML, legacy Office (.doc/.xls/.ppt), CSV/TSV, and OpenDocument files before they reach your LLM or RAG pipeline."
+site_description: "Open-source Python document security scanner for AI & RAG pipelines. Detects prompt injection, malware, and data exfiltration in PDF, DOCX, PPTX, XLSX, RTF, HTML, legacy Office, CSV/TSV, and OpenDocument files before they reach your LLM."
 site_url: https://www.docfirewall.com/
 repo_url: https://github.com/doc-firewall/doc-firewall
 copyright: "Copyright &copy; 2024–2026 DocFirewall. MIT Licensed."
@@ -42,11 +42,13 @@ theme:
       toggle:
         icon: material/weather-night
         name: Switch to light mode
-  font:
-    text: Roboto
-    code: Roboto Mono
+  # Disable Material's auto-loaded Google Fonts (Roboto / Roboto Mono).
+  # The fonts that actually get used (Inter + Fira Code) are loaded by
+  # docs/overrides/main.html with display=swap, eliminating the
+  # render-blocking + invisible-text font penalty Material's loader incurs.
+  font: false
   favicon: assets/favicon.png
-  logo: assets/logo.png
+  logo: assets/logo_header.webp
 
 plugins:
   - search

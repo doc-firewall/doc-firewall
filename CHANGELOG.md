@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] - 2026-05-25
+
+### Fixed
+
+- **Resume / real-world FP cluster** — `/URI` and `TargetMode="External"` no longer flag plain `http(s)`/`mailto`/`tel` hyperlinks (only `javascript:`/`data:`/`file:`/`vbscript:`/`jar:`/IP-literal targets fire T2); PDF structural tokens (`endobj`, `endstream`, `xref`, …) added to `_STOP_WORDS` so they no longer count as keyword stuffing; `repeated_seq` now rejects pure-numeric and single-char runs (PDF coordinate matrices like `0 0 0 0 …`) and emits richer evidence (`repeated_token`, `repeat_count`, `context`).
+- **`act as a` matched partial-word `imp[act as a]`** — Aho-Corasick hits now respect word boundaries when the phrase itself starts/ends with a word char; structural markers (`<tool_call>`, `[inst]`, `{{system}}`) still match as substrings.
+
+### Changed
+
+- All per-stage scan timeouts raised to 5 minutes (`docling_subprocess_timeout_s` = 270 s) to absorb large benign documents under the strict profile.
+- **Docling device is platform-aware by default.** New `limits.docling_device` config field (env: `DOC_FIREWALL_LIMITS_DOCLING_DEVICE`) accepts `cpu` | `auto` | `cuda` | `cuda:N` | `mps` | `xpu`. Default is `cpu` on macOS (Docling's auto-detection would pick MPS, whose float64 limitation crashes the layout model with `"Cannot convert a MPS Tensor to float64 dtype"`) and `auto` everywhere else so Linux/Windows CUDA/XPU boxes get GPU acceleration automatically. Override per process with the env var or via `ScanConfig(limits={"docling_device": "..."})`.
+
 ## [0.4.3] - 2026-05-23
 
 ### Fixed

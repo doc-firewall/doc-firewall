@@ -9,6 +9,7 @@ def parse_docx(path: str, config: ScanConfig) -> ParsedDocument:
         path,
         max_num_pages=config.limits.max_pages,
         max_file_size_bytes=config.limits.max_mb * 1024 * 1024,
+        device=config.limits.docling_device,
     )
     # d is the merged metadata
     return ParsedDocument(

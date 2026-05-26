@@ -118,6 +118,23 @@ def _generate_edit_distance_1(phrase: str) -> set[str]:
         variants.add(phrase[:i] + b + a + phrase[i + 2:])
     return variants
 
+def _match_respects_word_boundaries(text: str, end_idx: int, phrase: str) -> bool:
+    """Reject Aho-Corasick hits that span partial words.
+
+    Boundary checks only apply on a side where `phrase` itself starts/ends with
+    an alphanumeric char. This keeps structural markers ("<tool_call>", "[inst]",
+    "{{system}}") matchable as substrings while preventing word-fragment phrases
+    like "act as a" from matching inside "impact as a Full Stack Developer".
+    """
+    start = end_idx - len(phrase) + 1
+    end = end_idx + 1
+    if phrase[:1].isalnum() and start > 0 and text[start - 1].isalnum():
+        return False
+    if phrase[-1:].isalnum() and end < len(text) and text[end].isalnum():
+        return False
+    return True
+
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -582,6 +599,9 @@ class AdvancedPromptInjectionDetector(Detector):
                 # `(_, (_, phrase, _))` so we explicitly destructure.
                 for _end, value in self._automaton.iter(text_norm):
                     _, phrase, is_fuzzy = value if len(value) == 3 else (*value, False)
+                    if not _match_respects_word_boundaries(text_norm, _end, phrase):
+                        # e.g. "act as a" must not match inside "impact as a Full Stack"
+                        continue
                     if is_fuzzy:
                         # F.2: edit-distance-1 hit — emit MEDIUM rather than
                         # HIGH so a single typo doesn't push to BLOCK on its
@@ -631,6 +651,8 @@ class AdvancedPromptInjectionDetector(Detector):
                     reversed_text = text_norm[:200_000][::-1]
                     for _end, value in self._automaton.iter(reversed_text):
                         _, phrase, is_fuzzy = value if len(value) == 3 else (*value, False)
+                        if not _match_respects_word_boundaries(reversed_text, _end, phrase):
+                            continue
                         if is_fuzzy:
                             continue  # don't double-fire on fuzzy reversed
                         findings.append(Finding(

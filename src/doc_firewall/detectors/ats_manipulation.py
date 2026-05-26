@@ -11,6 +11,27 @@ from ..report import Finding
 from .base import Detector
 from .injection_normalizer import normalize_for_matching as _norm_for_matching
 
+# PDF / PostScript / OOXML structural keywords that leak into extracted
+# text when a parser falls back to raw stream content. These are never
+# legitimate body-content tokens, so treating them as content for the
+# "keyword stuffing" check produces false positives on every PDF resume
+# with many small objects.
+_DOCUMENT_STRUCTURE_TOKENS: frozenset[str] = frozenset({
+    # PDF body / cross-reference
+    "obj", "endobj", "stream", "endstream", "xref", "trailer", "startxref",
+    # PDF CMap / ToUnicode
+    "begincmap", "endcmap", "beginbfchar", "endbfchar",
+    "beginbfrange", "endbfrange", "begincidchar", "endcidchar",
+    "begincidrange", "endcidrange", "beginnotdefrange", "endnotdefrange",
+    # PDF dictionary primitives (PostScript carry-over)
+    "def", "dict", "null", "true", "false", "currentdict",
+    # PDF colour-space operators (single letters handled by len-check; these
+    # are the named ones)
+    "rgb", "cmyk", "gray", "devicergb", "devicecmyk", "devicegray",
+    # OOXML / HTML markup fragments occasionally leaking through cell text
+    "div", "span", "tbody", "thead", "tfoot",
+})
+
 # Common English function words that legitimately appear at high frequency.
 # Exclude these from the ungated 8% frequency check so natural prose
 # (e.g. "and" appearing ~8% of tokens in a job description) is not flagged.
@@ -29,7 +50,29 @@ _STOP_WORDS: frozenset[str] = frozenset({
     "you", "we", "us", "me", "my", "he", "i",
     # Common auxiliaries / modals missed above
     "may", "must", "shall", "does", "did", "use", "per", "via",
-})
+}) | _DOCUMENT_STRUCTURE_TOKENS
+
+
+def _is_meaningful_repetition(group: str) -> bool:
+    """Reject `repeated_seq` matches that are not real content stuffing.
+
+    PDF coordinate matrices ("0 0 0 0 ..."), bullet artifacts, and
+    structural keyword leakage produce long verbatim repetitions that look
+    mechanical but carry no semantic stuffing intent.
+    """
+    tokens = group.strip().split()
+    if not tokens:
+        return False
+    # All pure-numeric tokens (PDF graphics coords, image dimensions)
+    if all(re.fullmatch(r"-?\d+(?:\.\d+)?", t) for t in tokens):
+        return False
+    # All single-character tokens (bullet/spacing noise)
+    if all(len(t) <= 1 for t in tokens):
+        return False
+    # All stop words or structural tokens
+    if all(t.lower() in _STOP_WORDS for t in tokens):
+        return False
+    return True
 
 
 class ATSManipulationDetector(Detector):
@@ -57,14 +100,30 @@ class ATSManipulationDetector(Detector):
             # Check for repeated sequences (e.g. "Java Java Java Java" or "Best Candidate Best Candidate")
             # We match 1 to 6 words repeated at least 10 times (covers multi-word skill phrases).
             repeated_seq = re.search(r"(\b(?:\w+\s+){1,6})\1{10,}", text, flags=re.IGNORECASE)
-            if repeated_seq:
+            if repeated_seq and _is_meaningful_repetition(repeated_seq.group(1)):
+                match_start = repeated_seq.start()
+                match_end = repeated_seq.end()
+                ctx_start = max(0, match_start - 60)
+                ctx_end = min(len(text), match_end + 60)
+                context = text[ctx_start:ctx_end].replace("\n", " ")
+                repeated_token = repeated_seq.group(1).strip()
+                repeat_count = len(re.findall(re.escape(repeated_token), repeated_seq.group(0)))
                 findings.append(
                     Finding(
                         threat_id=ThreatID.T9_ATS_MANIPULATION,
                         severity=Severity.HIGH,
                         title="Repeated Keywords Sequence",
-                        explain="Detected a sequence of identical words repeated 10+ times.",
-                        evidence={"snippet": repeated_seq.group(0)[:50], "malicious_text": repeated_seq.group(0)[:250]},
+                        explain=(
+                            f"Token sequence '{repeated_token}' repeats "
+                            f"{repeat_count}+ times consecutively."
+                        ),
+                        evidence={
+                            "repeated_token": repeated_token,
+                            "repeat_count": repeat_count,
+                            "context": context,
+                            "match_position": match_start,
+                            "malicious_text": repeated_seq.group(0)[:250],
+                        },
                         module=self.name,
                         confidence=0.9,
                     )
