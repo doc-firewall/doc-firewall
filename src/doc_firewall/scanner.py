@@ -8,10 +8,11 @@ from typing import Optional
 from concurrent.futures import ThreadPoolExecutor
 
 from .config import ScanConfig
-from .enums import ThreatID, Severity, Verdict
+from .enums import ThreatID, Severity, Verdict, VerdictClass
 from .policy import Policy, PolicyEngine
 from .report import ScanReport, Finding
 from .risk_model import RiskModel
+from .detectors.explanations import enrich_findings
 from .analyzers.pdf.fast_scan import fast_scan_pdf
 from .analyzers.docx.fast_scan import fast_scan_docx
 from .analyzers.pptx.fast_scan import fast_scan_pptx
@@ -410,6 +411,8 @@ class Scanner:
                     explain=f"SHA-256 {sha[:16]}… is on the deny list for policy '{effective_policy.name}'.",
                     module="policy.deny_list",
                     confidence=1.0,
+                    # Explicit deny-list match — definitive.
+                    verdict_class=VerdictClass.BLOCK,
                 )
             )
             report.risk_score = 1.0
@@ -445,7 +448,8 @@ class Scanner:
                 )
             )
             report.risk_score = self.risk_model.calculate_risk(report.findings)
-            report.verdict = self.risk_model.get_verdict(report.risk_score)
+            enrich_findings(report.findings)
+            report.verdict = self.risk_model.get_verdict(report.risk_score, report.findings)
             return report  # Early exit
 
         fast_findings = []
@@ -567,7 +571,8 @@ class Scanner:
             report.risk_score = self.risk_model.calculate_risk(
                 report.findings, custom_threat_weights=custom_weights
             )
-            report.verdict = self.risk_model.get_verdict(report.risk_score)
+            enrich_findings(report.findings)
+            report.verdict = self.risk_model.get_verdict(report.risk_score, report.findings)
             return report
 
         # T6 DOS HIGH → skip deep scan.  Confirmed-bomb documents can hang the
@@ -582,7 +587,8 @@ class Scanner:
             report.risk_score = self.risk_model.calculate_risk(
                 report.findings, custom_threat_weights=custom_weights
             )
-            report.verdict = self.risk_model.get_verdict(report.risk_score)
+            enrich_findings(report.findings)
+            report.verdict = self.risk_model.get_verdict(report.risk_score, report.findings)
             return report
 
         # Determine Deep Scan
@@ -613,7 +619,8 @@ class Scanner:
         if not should_deep_scan:
             log_ctx.info("Skipping deep scan (score below threshold)", score=fast_score)
             report.risk_score = fast_score
-            report.verdict = self.risk_model.get_verdict(report.risk_score)
+            enrich_findings(report.findings)
+            report.verdict = self.risk_model.get_verdict(report.risk_score, report.findings)
             return report
 
         # --- STAGE 2: DEEP SCAN ---
@@ -829,6 +836,8 @@ class Scanner:
                                     ),
                                     evidence=av_res,
                                     module="integrations.antivirus",
+                                    # Third-party AV signature match — definitive.
+                                    verdict_class=VerdictClass.BLOCK,
                                 )
                             )
                     except asyncio.TimeoutError:
@@ -861,7 +870,8 @@ class Scanner:
         report.risk_score = self.risk_model.calculate_risk(
             report.findings, custom_threat_weights=custom_weights
         )
-        report.verdict = self.risk_model.get_verdict(report.risk_score)
+        enrich_findings(report.findings)
+        report.verdict = self.risk_model.get_verdict(report.risk_score, report.findings)
 
         # Required-detector validation — record which required threat IDs had no findings
         if effective_policy and effective_policy.required_detectors:

@@ -108,6 +108,53 @@ class TestEmbeddedPayloadRegressions(unittest.TestCase):
         findings = self.det.run(doc, self.cfg)
         self.assertTrue(any(f.threat_id == ThreatID.T7_EMBEDDED_PAYLOAD for f in findings))
 
+    def test_jpeg_eoi_in_pdf_tail_does_not_fire(self):
+        """T7 regression: 0xFF 0xD9 appearing in a PDF tail (compressed
+        stream byte coincidence) must not fire the JPEG-appended-data
+        check — that check is gated on file extension."""
+        import tempfile
+        # 1 KB of random-ish bytes ending with 0xFF 0xD9 followed by more bytes.
+        # On the old code this would fire T7 MEDIUM "JPEG: Data Appended After
+        # EOI Marker" on a .pdf file. With the file-extension guard, no T7
+        # JPEG finding should fire.
+        body = b"%PDF-1.4\n" + bytes(range(256)) * 4 + b"\xff\xd9" + b"trailing bytes\n%%EOF"
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+            f.write(body)
+            pdf_path = f.name
+        try:
+            findings = self.det.fast_scan(pdf_path, self.cfg)
+            jpeg_findings = [
+                f for f in findings if "JPEG" in f.title and "EOI" in f.title
+            ]
+            self.assertFalse(
+                jpeg_findings,
+                f"PDF must not trigger JPEG-EOI check; got: {[f.title for f in jpeg_findings]}",
+            )
+        finally:
+            import os
+            os.unlink(pdf_path)
+
+    def test_jpeg_eoi_in_actual_jpeg_still_fires(self):
+        """T7 positive: the JPEG-appended-data check must STILL fire on a
+        real .jpg file with bytes after the EOI marker."""
+        import tempfile
+        body = b"\xff\xd8\xff\xe0\x00\x10JFIF" + b"\x00" * 100 + b"\xff\xd9" + b"hidden payload here"
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+            f.write(body)
+            jpg_path = f.name
+        try:
+            findings = self.det.fast_scan(jpg_path, self.cfg)
+            jpeg_findings = [
+                f for f in findings if "JPEG" in f.title and "EOI" in f.title
+            ]
+            self.assertTrue(
+                jpeg_findings,
+                "Actual .jpg with appended data should still fire T7 JPEG-EOI",
+            )
+        finally:
+            import os
+            os.unlink(jpg_path)
+
 
 # ── B2 regression: hardcoded exclusion removed ───────────────────────────────
 

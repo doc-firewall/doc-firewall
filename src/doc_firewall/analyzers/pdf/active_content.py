@@ -3,7 +3,7 @@ from typing import List, Dict, Any
 import os
 import re
 from ...report import Finding
-from ...enums import ThreatID, Severity
+from ...enums import ThreatID, Severity, VerdictClass
 from ...config import ScanConfig
 from ..base import ParsedDocument
 
@@ -114,6 +114,10 @@ def detect_pdf_active_content(doc: ParsedDocument, config: ScanConfig) -> List[F
                 },
                 module="pdf.active_content",
                 confidence=0.9,
+                # javascript:/data:/file:/vbscript:/jar:/IP-literal hyperlinks
+                # have no legitimate use case — definitive code-execution or
+                # data-exfil vector. BLOCK.
+                verdict_class=VerdictClass.BLOCK,
             )
         )
     return findings

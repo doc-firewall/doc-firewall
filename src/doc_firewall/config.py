@@ -361,9 +361,11 @@ class ScanConfig(BaseSettings):
     prompt_injection_keywords_bytes: list[bytes] = Field(
         default_factory=lambda: [
             b"ignore previous",
-            b"system instruction",
-            b"system prompt",
-            b"reveal your",
+            # Removed: bare "system instruction" / "system prompt" / "reveal your"
+            # fire on legit LLM-security docs, research papers, and marketing
+            # content that mention these terms descriptively. Real attacks use
+            # full adversarial phrases ("new system prompt:", "reveal your
+            # system prompt"), which the deep-scan Aho-Corasick already catches.
             b"ignore the above",
             b"new instruction",
             b"hiring manager",

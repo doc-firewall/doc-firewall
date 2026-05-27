@@ -18,7 +18,7 @@ import re
 from typing import List
 
 from ...config import ScanConfig
-from ...enums import ThreatID, Severity
+from ...enums import ThreatID, Severity, VerdictClass
 from ...report import Finding
 from ...logger import get_logger
 
@@ -163,6 +163,9 @@ def fast_scan_csv(file_path: str, config: ScanConfig) -> List[Finding]:
             confidence=0.95,
             module="fast_scan.csv.dde",
             mitre_technique="T1559.002",
+            # Definitive code-execution vector — `=cmd|'/c calc'!A1` shape
+            # has no legitimate use case; always BLOCK.
+            verdict_class=VerdictClass.BLOCK,
         ))
 
     # T6: bomb guard

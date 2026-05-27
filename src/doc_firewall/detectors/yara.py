@@ -5,7 +5,7 @@ from .base import Detector
 from ..analyzers.base import ParsedDocument
 from ..config import ScanConfig
 from ..report import Finding
-from ..enums import ThreatID, Severity
+from ..enums import ThreatID, Severity, VerdictClass
 from ..logger import get_logger
 
 logger = get_logger()
@@ -75,6 +75,8 @@ class YaraDetector(Detector):
                     explain="Found EICAR test string in document text or metadata.",
                     evidence={"signature": "EICAR-STANDARD-ANTIVIRUS-TEST-FILE"},
                     module=self.name,
+                    # EICAR is a verified malware test signature — definitive.
+                    verdict_class=VerdictClass.BLOCK,
                 )
             )
             return findings  # CRITICAL stops scan usually
@@ -104,6 +106,8 @@ class YaraDetector(Detector):
                         cve=m.meta.get("cve") or None,
                         mitre_technique=m.meta.get("mitre") or None,
                         attack_objective=m.meta.get("description") or None,
+                        # YARA signature hit on document content — definitive.
+                        verdict_class=VerdictClass.BLOCK,
                     )
                 )
 
@@ -129,6 +133,8 @@ class YaraDetector(Detector):
                                 cve=m.meta.get("cve") or None,
                                 mitre_technique=m.meta.get("mitre") or None,
                                 attack_objective=m.meta.get("description") or None,
+                                # YARA signature hit on file bytes — definitive.
+                                verdict_class=VerdictClass.BLOCK,
                             )
                         )
         except Exception as e:

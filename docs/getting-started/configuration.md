@@ -340,21 +340,33 @@ Pillow is optional — if not installed, LSB analysis is silently skipped; the o
 
 ```yaml
 thresholds:
-  deep_scan_trigger: 0.20  # Risk score to trigger deep parsing (0.0–1.0)
-  flag: 0.25               # Return VERDICT=FLAG
-  block: 0.70              # Return VERDICT=BLOCK
+  deep_scan_trigger: 0.20  # Fast-scan risk to trigger the deep-scan stage
+  flag: 0.25               # Risk-band label boundary (UI only — does NOT gate verdict)
+  block: 0.70              # Risk-band label boundary (UI only — does NOT gate verdict)
 
 limits:
-  max_mb: 10               # Max file size in MB
-  max_pages: 1000          # PDF page limit
-  parse_timeout_ms: 15000  # Parsing timeout (ms)
+  max_mb: 10                          # Max file size in MB
+  max_pages: 1000                     # PDF page limit
+  fast_scan_timeout_ms: 300000        # Fast-scan stage timeout (5 min)
+  parse_timeout_ms: 300000            # Deep-scan parse stage timeout (5 min)
+  format_checks_timeout_ms: 300000    # Format-specific checks timeout (5 min)
+  detectors_timeout_ms: 300000        # Detector stage timeout (5 min)
+  antivirus_timeout_ms: 300000        # AV stage timeout (5 min)
+  docling_subprocess_timeout_s: 270   # Docling hard-kill (must be < parse_timeout_ms/1000)
+  docling_device: auto                # cpu | auto | cuda | cuda:N | mps | xpu
+                                       # default: cpu on macOS, auto elsewhere
   min_embedded_object_size_bytes: 20000
-  max_archive_depth: 3     # Max recursion depth for ZIP/tar archive scanning
-  max_archive_members: 50  # Max files scanned inside a single archive
+  max_archive_depth: 3                # Max recursion depth for ZIP/tar archive scanning
+  max_archive_members: 50             # Max files scanned inside a single archive
 ```
 
-!!! warning "Threshold calibration"
-    Thresholds were empirically calibrated via `scripts/calibrate_thresholds.py` (ROC-AUC = 1.0 on 1,185 labeled records). Do not lower `block` below 0.35 without re-running calibration on your own dataset.
+!!! info "`thresholds.flag` / `thresholds.block` no longer drive the verdict (0.4.4+)"
+    Since 0.4.4 the scan verdict is derived from finding **classes** (see [Risk Scoring & Verdict Model](../concepts/risk-scoring.md)), not from `risk_score` crossing a band. `flag` and `block` here are still honored as **risk-band labels** for dashboards / UI display — they let you call a 0.65 score "elevated" vs "severe" — but they do not decide which files BLOCK.
+
+    To make a file BLOCK, ensure at least one of its findings carries `verdict_class = BLOCK` (YARA hits, EICAR, `javascript:` URIs, embedded executables, etc. — full list in the verdict-model doc).
+
+!!! warning "Docling device on Apple Silicon"
+    Docling's auto-detection picks MPS on macOS, but its layout model uses float64 ops that MPS rejects (`"Cannot convert a MPS Tensor to float64 dtype"`). The default `docling_device` is therefore **`cpu` on macOS** and `auto` everywhere else. Override per-process with `DOC_FIREWALL_LIMITS_DOCLING_DEVICE` or via `ScanConfig(limits={"docling_device": "..."})`.
 
 ---
 
@@ -385,7 +397,7 @@ scanner = Scanner(config=config)
 | `policy_path` | `str \| None` | `None` | Path to YAML policy file. Engine is built automatically when set. |
 | `policy_name` | `str \| None` | `None` | Default named policy; used when no `applies_to` glob matches the file. |
 
-See [examples/policy.yaml](https://github.com/doc-firewall/doc-firewall/blob/main/examples/policy.yaml) for a full annotated example covering `allow_list`, `deny_list`, `required_detectors`, and `custom_threat_weights`.
+See [Policies](../concepts/policies.md) for the full schema, all four bundled policies (`hr-intake` / `legal-review` / `dev-tools` / `default`), resolution order, and notes on how the post-0.4.4 verdict model affects when `custom_threat_weights` matters. The raw YAML lives at [examples/policy.yaml](https://github.com/doc-firewall/doc-firewall/blob/main/examples/policy.yaml).
 
 ---
 

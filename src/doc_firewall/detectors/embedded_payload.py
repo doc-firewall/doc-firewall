@@ -8,7 +8,7 @@ from typing import List
 
 from ..analyzers.base import ParsedDocument
 from ..config import ScanConfig
-from ..enums import Severity, ThreatID
+from ..enums import Severity, ThreatID, VerdictClass
 from ..logger import get_logger
 from ..report import Finding
 from .base import Detector
@@ -118,6 +118,16 @@ class EmbeddedPayloadDetector(Detector):
                     },
                     module=self.name,
                     confidence=0.95 if dangerous else 0.80,
+                    # Only the *decoded-content-is-dangerous* path is
+                    # definitive (CRITICAL severity, dangerous=True means the
+                    # base64 decode contained shellcode markers, PE headers,
+                    # PowerShell encoded commands, eval(atob), cmd.exe /c, etc).
+                    # High-entropy alone (HIGH severity) is still REVIEW —
+                    # any compressed/encrypted legitimate content has high
+                    # entropy too.
+                    verdict_class=(
+                        VerdictClass.BLOCK if dangerous else VerdictClass.REVIEW
+                    ),
                 )
             )
             b64_reported = True
@@ -199,6 +209,9 @@ class EmbeddedPayloadDetector(Detector):
                         evidence={"pattern": pat, "malicious_text": text[:250]},
                         module=self.name,
                         confidence=0.95,
+                        # eval(atob(...)), powershell -enc, cmd.exe /c have
+                        # no legitimate use in document body text — definitive.
+                        verdict_class=VerdictClass.BLOCK,
                     )
                 )
 
@@ -283,6 +296,8 @@ class EmbeddedPayloadDetector(Detector):
                         ),
                         evidence={},
                         module="embedded_payload.fast",
+                        # PE DOS stub embedded in a document — definitive.
+                        verdict_class=VerdictClass.BLOCK,
                     )
                 )
 
@@ -303,6 +318,8 @@ class EmbeddedPayloadDetector(Detector):
                             explain="Found ELF binary header embedded in document.",
                             evidence={"offset": elf_idx},
                             module="embedded_payload.fast",
+                            # Linux binary embedded in a document — definitive.
+                            verdict_class=VerdictClass.BLOCK,
                         )
                     )
 
@@ -347,6 +364,8 @@ class EmbeddedPayloadDetector(Detector):
                     },
                     confidence=0.85,
                     module="embedded_payload.fast",
+                    # macOS binary embedded in a document — definitive.
+                    verdict_class=VerdictClass.BLOCK,
                 ))
                 break
 
@@ -395,6 +414,9 @@ class EmbeddedPayloadDetector(Detector):
                         confidence=0.85,
                         module="embedded_payload.fast",
                         cve="CVE-2023-36884",
+                        # CVE-2023-36884 / MOTW-bypass phishing chain pattern
+                        # — definitive when found inside a document file.
+                        verdict_class=VerdictClass.BLOCK,
                     ))
 
             # D.15: RAR archive header (Rar!\x1A\x07)
@@ -470,41 +492,49 @@ class EmbeddedPayloadDetector(Detector):
                             module="embedded_payload.fast",
                         ))
 
-            # JPEG: data after FF D9 (EOI)
-            eoi = tail.rfind(b"\xff\xd9")
-            if eoi != -1 and eoi < len(tail) - 2:
-                after = tail[eoi + 2:].strip(b"\x00\xff\n\r ")
-                if after:
-                    findings.append(Finding(
-                        threat_id=ThreatID.T7_EMBEDDED_PAYLOAD,
-                        severity=Severity.MEDIUM,
-                        title="JPEG: Data Appended After EOI Marker",
-                        explain=(
-                            "Non-zero data found after the JPEG End-of-Image "
-                            "marker (0xFF 0xD9) — a common steganographic carrier."
-                        ),
-                        evidence={"bytes_after_eoi": len(after)},
-                        confidence=0.75,
-                        module="embedded_payload.fast",
-                    ))
+            # JPEG: data after FF D9 (EOI). MUST be gated on file extension —
+            # the byte pair 0xFF 0xD9 routinely appears in PDF compressed
+            # streams (FlateDecode output), font data, and embedded image
+            # streams. Without this guard, every PDF that happens to contain
+            # 0xFF 0xD9 in its last 1024 bytes false-fires T7 MEDIUM.
+            if file_path.lower().endswith((".jpg", ".jpeg")):
+                eoi = tail.rfind(b"\xff\xd9")
+                if eoi != -1 and eoi < len(tail) - 2:
+                    after = tail[eoi + 2:].strip(b"\x00\xff\n\r ")
+                    if after:
+                        findings.append(Finding(
+                            threat_id=ThreatID.T7_EMBEDDED_PAYLOAD,
+                            severity=Severity.MEDIUM,
+                            title="JPEG: Data Appended After EOI Marker",
+                            explain=(
+                                "Non-zero data found after the JPEG End-of-Image "
+                                "marker (0xFF 0xD9) — a common steganographic carrier."
+                            ),
+                            evidence={"bytes_after_eoi": len(after)},
+                            confidence=0.75,
+                            module="embedded_payload.fast",
+                        ))
 
-            # PNG: data after IEND chunk (89 50 4E 47 ... 49 45 4E 44 AE 42 60 82)
-            iend = tail.rfind(b"\x49\x45\x4e\x44\xae\x42\x60\x82")
-            if iend != -1 and iend < len(tail) - 8:
-                after = tail[iend + 8:].strip(b"\x00\n\r ")
-                if after:
-                    findings.append(Finding(
-                        threat_id=ThreatID.T7_EMBEDDED_PAYLOAD,
-                        severity=Severity.MEDIUM,
-                        title="PNG: Data Appended After IEND Chunk",
-                        explain=(
-                            "Non-zero data found after the PNG IEND chunk — "
-                            "a common steganographic payload carrier."
-                        ),
-                        evidence={"bytes_after_iend": len(after)},
-                        confidence=0.75,
-                        module="embedded_payload.fast",
-                    ))
+            # PNG: data after IEND chunk. Same reason as the JPEG check above —
+            # the IEND signature bytes (`IEND\xae\x42\x60\x82`) can appear in
+            # compressed streams or embedded-image data inside non-PNG files.
+            if file_path.lower().endswith(".png"):
+                iend = tail.rfind(b"\x49\x45\x4e\x44\xae\x42\x60\x82")
+                if iend != -1 and iend < len(tail) - 8:
+                    after = tail[iend + 8:].strip(b"\x00\n\r ")
+                    if after:
+                        findings.append(Finding(
+                            threat_id=ThreatID.T7_EMBEDDED_PAYLOAD,
+                            severity=Severity.MEDIUM,
+                            title="PNG: Data Appended After IEND Chunk",
+                            explain=(
+                                "Non-zero data found after the PNG IEND chunk — "
+                                "a common steganographic payload carrier."
+                            ),
+                            evidence={"bytes_after_iend": len(after)},
+                            confidence=0.75,
+                            module="embedded_payload.fast",
+                        ))
 
         except Exception as e:
             logger.warning("Embedded payload fast scan error", error=str(e))

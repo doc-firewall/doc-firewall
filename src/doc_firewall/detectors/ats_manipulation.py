@@ -75,6 +75,28 @@ def _is_meaningful_repetition(group: str) -> bool:
     return True
 
 
+# Markdown/HTML comments and structural noise that Docling injects into
+# extracted text — for example `<!-- image -->` placeholders inserted at
+# every figure boundary. Counting these as content makes "image" the
+# dominant token in any document with many figures, false-firing T5/T9
+# keyword-stuffing. Strip before any frequency analysis.
+_DOCLING_NOISE_RE = re.compile(
+    r"<!--.*?-->"        # HTML / markdown comments — Docling uses `<!-- image -->`
+    r"|<[^>]{1,80}>"     # Bare HTML tags (rare but possible in extracted text)
+    r"|\bfigure\s+\d+\b" # "Figure N" auto-numbering noise
+    r"|\btable\s+\d+\b", # "Table N" auto-numbering noise
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _strip_extraction_noise(text: str) -> str:
+    """Remove Docling / markdown extraction artifacts that would otherwise
+    pollute token-frequency analysis. Returns text suitable for T5/T9
+    repetition and stuffing checks. Leaves the original `doc.text`
+    untouched."""
+    return _DOCLING_NOISE_RE.sub(" ", text)
+
+
 class ATSManipulationDetector(Detector):
     name = "ats_manipulation"
 
@@ -83,7 +105,10 @@ class ATSManipulationDetector(Detector):
             return []
 
         findings = []
-        text = doc.text or ""
+        # Strip Docling / markdown extraction noise (e.g. `<!-- image -->`
+        # placeholders inserted at every figure) so frequency analysis
+        # measures real content, not extraction artifacts.
+        text = _strip_extraction_noise(doc.text or "")
 
         # 1. Keyword Stuffing
         # Check for repeated words in close proximity or high frequency

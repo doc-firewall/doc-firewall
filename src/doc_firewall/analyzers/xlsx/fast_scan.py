@@ -3,7 +3,7 @@ import re
 import zipfile
 from typing import List
 
-from ...enums import ThreatID, Severity
+from ...enums import ThreatID, Severity, VerdictClass
 from ...report import Finding
 from ...config import ScanConfig
 from ...logger import get_logger
@@ -285,6 +285,16 @@ def fast_scan_xlsx(file_path: str, config: ScanConfig) -> List[Finding]:
                             evidence=evidence,
                             confidence=0.75,
                             module="fast_scan.xlsx.ole",
+                            # MZ (PE) or ELF magic in an embedded object is
+                            # definitive — no legitimate document needs to
+                            # embed a Windows or Linux executable. OLE alone
+                            # stays REVIEW (could be a benign Equation or
+                            # ChartObject); only MZ/ELF flips to BLOCK.
+                            verdict_class=(
+                                VerdictClass.BLOCK
+                                if severity == Severity.CRITICAL
+                                else VerdictClass.REVIEW
+                            ),
                         )
                     )
 
@@ -463,6 +473,16 @@ def fast_scan_xlsx(file_path: str, config: ScanConfig) -> List[Finding]:
                                 confidence=0.95 if very_hidden_sheets else 0.85,
                                 module="fast_scan.xlsx.xlm",
                                 mitre_technique="T1059.005",
+                                # Inline XLM with a veryHidden sheet is the
+                                # exact dropper pattern (Pikabot/IcedID/Qakbot)
+                                # — definitive. Bare XLM without veryHidden
+                                # could be a legit Excel 4 workbook (rare but
+                                # possible) — stays REVIEW.
+                                verdict_class=(
+                                    VerdictClass.BLOCK
+                                    if very_hidden_sheets
+                                    else VerdictClass.REVIEW
+                                ),
                             )
                         )
 

@@ -1,5 +1,5 @@
 from typing import Dict, List, Optional
-from .enums import Severity, ThreatID, Verdict
+from .enums import Severity, ThreatID, Verdict, VerdictClass
 from .report import Finding
 from .config import ScanConfig
 
@@ -44,6 +44,14 @@ class RiskModel:
         threat_id group is kept.  This prevents two weak signals on the
         same piece of text from multiplying into a BLOCK verdict.
         """
+        # INFO-class findings are recorded for audit but do not contribute
+        # to the risk score — they're descriptive (e.g. "PDF has 2 update
+        # layers") and matching them against a probabilistic threshold
+        # produces noise, not signal. The verdict logic also ignores them.
+        scoring_findings = [
+            f for f in findings if f.verdict_class != VerdictClass.INFO
+        ]
+
         # Group by (threat_id, malicious_text_fingerprint); keep max confidence.
         #
         # Key strategy: when the finding carries a non-empty malicious_text
@@ -53,7 +61,7 @@ class RiskModel:
         # When the artifact is empty, include title to prevent unrelated findings
         # — e.g. two distinct T6 timeout findings — from wrongly merging.
         best: dict[tuple, Finding] = {}
-        for f in findings:
+        for f in scoring_findings:
             artifact = (f.evidence or {}).get("malicious_text", "")
             if artifact:
                 key: tuple = (f.threat_id, artifact[:80])
@@ -85,7 +93,55 @@ class RiskModel:
 
         return 1.0 - prod
 
-    def get_verdict(self, risk_score: float) -> Verdict:
+    def get_verdict(
+        self,
+        risk_score: float,
+        findings: Optional[List[Finding]] = None,
+    ) -> Verdict:
+        """Derive the scan verdict from finding classes (not from the score).
+
+        New (post-0.4.4) semantics:
+
+          - **BLOCK** iff any finding has ``verdict_class == BLOCK``. This
+            class is reserved for definitive evidence — YARA signature
+            matches, ``javascript:`` URIs, EICAR, ``/JavaScript`` +
+            ``/OpenAction`` co-occurrence, JBIG2Decode exploit pattern,
+            embedded PE/ELF in a non-archive, etc. No combination of weaker
+            (REVIEW-class) findings can produce a BLOCK.
+          - **FLAG** iff any finding has ``verdict_class == REVIEW`` (the
+            default for new / unaudited findings). These are heuristic
+            signals worth human attention but not by themselves proof of
+            malice.
+          - **ALLOW** otherwise (no findings, or only ``INFO``-class
+            findings recorded for audit).
+
+        ``risk_score`` is still computed and exposed for analytics, but no
+        longer gates the verdict. ``thresholds.flag`` / ``thresholds.block``
+        in the config are kept for backwards compatibility with downstream
+        tools that label the numeric score band, but they no longer drive
+        BLOCK / FLAG decisions.
+
+        If ``findings`` is omitted, falls back to the legacy score-band
+        behaviour so old callers don't break — but every internal
+        Scanner code path passes findings.
+        """
+        if findings is not None:
+            classes = {f.verdict_class for f in findings}
+            if VerdictClass.BLOCK in classes:
+                return Verdict.BLOCK
+            if VerdictClass.REVIEW in classes:
+                return Verdict.FLAG
+            return Verdict.ALLOW
+
+        # Legacy score-band fallback for external callers that haven't been
+        # updated. Emits a deprecation warning the first time it fires.
+        import warnings
+        warnings.warn(
+            "RiskModel.get_verdict(risk_score) without findings is deprecated; "
+            "pass the findings list so verdict can be derived from finding classes.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if risk_score > self.config.thresholds.block:
             return Verdict.BLOCK
         if risk_score >= self.config.thresholds.flag:

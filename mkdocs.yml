@@ -134,6 +134,7 @@ nav:
     - Architecture: concepts/architecture.md
     - Threat Model: concepts/threats.md
     - Risk Scoring: concepts/risk-scoring.md
+    - Policies: concepts/policies.md
   - Features:
     - Overview: features/overview.md
     - Advanced ML Scanners: features/advanced_ml.md

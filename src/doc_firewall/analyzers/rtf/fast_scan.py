@@ -16,7 +16,7 @@ from typing import List
 
 from ...report import Finding
 from ...config import ScanConfig
-from ...enums import ThreatID, Severity
+from ...enums import ThreatID, Severity, VerdictClass
 
 
 # Byte-level patterns — all RTF control words start with backslash
@@ -91,6 +91,9 @@ def fast_scan_rtf(file_path: str, config: ScanConfig) -> List[Finding]:
                 explain="RTF document contains a \\javascript control word.",
                 evidence={"malicious_text": "\\javascript"},
                 module="rtf.fast_scan",
+                # RTF \javascript control word has no legitimate use —
+                # only added by exploit-authoring tools. Definitive.
+                verdict_class=VerdictClass.BLOCK,
             ))
 
     # ── T2: External field references ───────────────────────────────────────
