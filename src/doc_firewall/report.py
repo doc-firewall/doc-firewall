@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field, asdict
 from typing import Any, Dict, List, Optional
-from .enums import Verdict, Severity, ThreatID
+from .enums import Verdict, Severity, ThreatID, VerdictClass
 
 
 @dataclass
@@ -22,6 +22,21 @@ class Finding:
     cve: Optional[str] = None               # e.g. "CVE-2017-11882"
     mitre_technique: Optional[str] = None   # e.g. "T1059.007"
     attack_objective: Optional[str] = None  # Plain-English attacker goal
+
+    # Verdict-driving class — see enums.VerdictClass. Default REVIEW is
+    # safe: an unaudited finding contributes to the score and can FLAG
+    # but cannot BLOCK. Definitive detectors (YARA, EICAR, javascript:,
+    # JBIG2 exploit pattern, etc.) explicitly set this to BLOCK; purely
+    # informational findings set it to INFO.
+    verdict_class: VerdictClass = VerdictClass.REVIEW
+
+    # Under-the-hood technical context — populated by the
+    # detectors.explanations.enrich_findings() post-process for findings
+    # whose `explain` is rewritten to plain English. Lets SIEMs / forensic
+    # analysts see the original technical detail without losing the
+    # human-readable summary in `explain`. None for findings the enricher
+    # didn't recognise (their `explain` stays technical, no rewrite).
+    technical_detail: Optional[str] = None
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Finding):

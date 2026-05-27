@@ -3,7 +3,7 @@ import re
 import zipfile
 from typing import List
 
-from ...enums import ThreatID, Severity
+from ...enums import ThreatID, Severity, VerdictClass
 from ...report import Finding
 from ...config import ScanConfig
 from ...logger import get_logger
@@ -291,6 +291,12 @@ def fast_scan_pptx(file_path: str, config: ScanConfig) -> List[Finding]:
                             evidence=evidence,
                             confidence=0.75,
                             module="fast_scan.pptx.ole",
+                            # MZ/ELF in an embedded object is definitive.
+                            verdict_class=(
+                                VerdictClass.BLOCK
+                                if severity == Severity.CRITICAL
+                                else VerdictClass.REVIEW
+                            ),
                         )
                     )
 

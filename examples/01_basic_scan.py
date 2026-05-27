@@ -40,7 +40,14 @@ def main():
         print("-" * 30)
 
         for f in report.findings:
-            print(f"[{f.severity}] {f.title}: {f.explain}")
+            # `explain` is plain-language (intended for non-technical reviewers).
+            # `technical_detail` carries the original under-the-hood context —
+            # populated by detectors/explanations.py for recognised finding
+            # types; None for finding types without an enrichment entry.
+            print(f"[{f.severity}] {f.title}")
+            print(f"  What this means : {f.explain}")
+            if f.technical_detail:
+                print(f"  Under the hood  : {f.technical_detail}")
 
 if __name__ == "__main__":
     main()

@@ -6,7 +6,7 @@ from ..analyzers.base import ParsedDocument
 from ..config import ScanConfig
 from ..report import Finding
 from ..enums import ThreatID, Severity
-from .ats_manipulation import _STOP_WORDS
+from .ats_manipulation import _STOP_WORDS, _strip_extraction_noise
 
 
 class RankingManipulationDetector(Detector):
@@ -15,7 +15,10 @@ class RankingManipulationDetector(Detector):
     def run(self, doc: ParsedDocument, config: ScanConfig) -> List[Finding]:
         if not config.enable_ranking_abuse:
             return []
-        text = (doc.text or "").lower()
+        # Strip Docling extraction artifacts (`<!-- image -->`, `Figure 5`,
+        # etc.) before frequency analysis so the keyword stuffing check
+        # operates on real content.
+        text = _strip_extraction_noise(doc.text or "").lower()
         tokens = [
             t for t in text.split()
             if t.isalpha() and len(t) > 2 and t not in _STOP_WORDS

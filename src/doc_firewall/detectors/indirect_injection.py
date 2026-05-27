@@ -57,13 +57,63 @@ _TOOL_CALL_FUNC_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Signal B: fetch/instruction verbs
-_FETCH_VERBS_RE = re.compile(
-    r'\b(?:fetch|retrieve|download|load\s+from|read\s+from|'
+# Signal B: fetch/instruction verbs in an IMPERATIVE-AT-AGENT context only.
+#
+# Previously the rule was bare "verb within 500 chars of URL", which false-
+# fires on any resume / engineering doc that describes building data-fetch
+# systems near a contact link ("Built RAG service to ingest documents …
+# https://linkedin.com/in/me"). Tightened so the verb must appear in one
+# of three imperative contexts:
+#
+#   (a) at a sentence boundary (./!/?/:/;/newline), optionally preceded by
+#       a temporal adverb — i.e. a sentence-start imperative
+#   (b) preceded within ~40 chars by an agent-addressing token
+#       (you / AI / agent / assistant / model / LLM / chatbot / bot or a
+#        specific model name) — i.e. "AI should fetch …"
+#   (c) directly preceded by a politeness marker (please / kindly) — i.e.
+#       "…, please retrieve …" or "kindly download …"
+#
+# "see also" was removed entirely — in practice it is almost always a
+# citation in academic / technical prose, not a fetch instruction.
+_VERB_GROUP = (
+    r'(?:fetch|retrieve|download|load\s+from|read\s+from|'
     r'execute\s+instructions?\s+from|import\s+from|get\s+from|pull\s+from|'
-    r'follow\s+the\s+instructions?\s+(?:at|from|in)|see\s+also)\b',
+    r'follow\s+the\s+instructions?\s+(?:at|from|in))'
+)
+_IMPERATIVE_FETCH_RE = re.compile(
+    r'(?:^|[.!?:;\n])\s*(?:now\s+|then\s+|first\s+|next\s+|finally\s+)?'
+    + _VERB_GROUP + r'\b',
+    re.IGNORECASE | re.MULTILINE,
+)
+# Drop "you" — appears in any human-addressed document ("you can download
+# IRS forms at..."); too noisy. Keep only AI/agent/model addressing.
+# Drop "can" from modals — "X can fetch" is descriptive ("the model can
+# fetch"), not directive. Keep must/should/will/please which are directive.
+_AGENT_ADDRESSED_FETCH_RE = re.compile(
+    r'\b(?:AI|agent|assistant|model|LLM|chatbot|bot|'
+    r'Claude|GPT|ChatGPT|Gemini|Bard|Llama|Mistral|Copilot)\s+'
+    r'(?:must\s+|should\s+|will\s+|please\s+)?' + _VERB_GROUP + r'\b',
     re.IGNORECASE,
 )
+# Politeness markers preceding a fetch verb — strong signal of an
+# instruction, regardless of preceding punctuation. Catches "...please
+# retrieve X" and "kindly download Y" where there isn't a hard sentence
+# boundary right before "please" (e.g. preceded by a comma).
+_POLITE_FETCH_RE = re.compile(
+    r'\b(?:please|kindly)\s+(?:now\s+|then\s+)?' + _VERB_GROUP + r'\b',
+    re.IGNORECASE,
+)
+
+
+def _has_imperative_fetch(window: str) -> bool:
+    """True iff `window` contains a fetch verb addressed at an agent,
+    written as a sentence-start imperative, or preceded by a politeness
+    marker — not just any occurrence of the verb."""
+    return bool(
+        _POLITE_FETCH_RE.search(window)
+        or _AGENT_ADDRESSED_FETCH_RE.search(window)
+        or _IMPERATIVE_FETCH_RE.search(window)
+    )
 
 # T4 anchor phrases for HIGH-severity escalation
 _T4_ANCHORS_RE = re.compile(
@@ -187,7 +237,7 @@ class IndirectInjectionDetector(Detector):
             win_end = min(len(text), a_end + _WINDOW)
             window = text[win_start:win_end]
 
-            if not _FETCH_VERBS_RE.search(window):
+            if not _has_imperative_fetch(window):
                 continue
 
             # Determine severity: escalate to HIGH if a T4 anchor is also present

@@ -1,7 +1,11 @@
 # DocFirewall Configuration File (YAML)
+#
+# All fields shown reflect the 0.4.4 defaults unless commented otherwise.
+# Load with: `ScanConfig.from_yaml("doc_firewall_config.yaml")`.
 
 # --- General ---
-# Environment profile (strict, balanced, lenient)
+# Environment profile (strict, balanced, lenient).
+# Strict lowers detection budgets and enables all ML layers.
 profile: balanced
 
 # Toggle specific scan modules
@@ -14,25 +18,44 @@ enable_pii_checks: false
 antivirus:
   # Provider options: "clamav", "virustotal", "generic_cli"
   provider: virustotal
-  
+
   # For VirusTotal
   virustotal_api_key: "YOUR_VT_API_KEY_HERE"
-  
+
   # For ClamAV
   clamav_bin_path: "clamscan"
   # clamav_socket_path: "/var/run/clamav/clamd.ctl"
-  
+
   # For Custom/Other (e.g., Sophos, Windows Defender)
-  # generic_cli_command: "sophos_scan --file {path}" 
+  # generic_cli_command: "sophos_scan --file {path}"
   # generic_cli_infected_codes: [1, 2]
 
 # --- Limits & Timeouts ---
+# All per-stage timeouts default to 5 minutes (300_000 ms). These absorb
+# cold-start ML model loads on the first scan after process boot and
+# accommodate larger production documents.
 limits:
-  max_mb: 10
-  parse_timeout_ms: 15000
-  antivirus_timeout_ms: 10000
+  max_mb: 10                          # Max file size
+  fast_scan_timeout_ms: 300000        # Raw-bytes fast-scan stage
+  parse_timeout_ms: 300000            # Deep-scan parse stage (Docling / fallback)
+  format_checks_timeout_ms: 300000    # Format-specific checks (active content / obfuscation)
+  detectors_timeout_ms: 300000        # Detector pipeline (includes ML layers)
+  antivirus_timeout_ms: 300000        # External AV engine call
+  docling_subprocess_timeout_s: 270   # Hard SIGKILL on the Docling subprocess.
+                                       # MUST be < parse_timeout_ms/1000 so the
+                                       # thread can clean up before asyncio cancels.
+  # Device for Docling model inference. Default is platform-aware:
+  #   - "cpu"  on macOS  (avoids MPS float64-unsupported crash)
+  #   - "auto" elsewhere (Docling picks CUDA / XPU when available)
+  # Override values: cpu | auto | cuda | cuda:N | mps | xpu
+  # docling_device: auto
 
-# --- Threat Detection Thresholds (0.0 - 1.0) ---
+# --- Risk-Score Bands (NOT verdict gates as of 0.4.4) ---
+# Since 0.4.4 the scan verdict (ALLOW / FLAG / BLOCK) is derived from the
+# verdict_class of each Finding, NOT from risk_score crossing a threshold.
+# The values below are still honored as dashboard band labels but no
+# longer change which files BLOCK. See concepts/risk-scoring for details.
 thresholds:
-  flag: 0.35
-  block: 0.80
+  deep_scan_trigger: 0.20             # Fast-scan score to trigger deep parse
+  flag: 0.25                          # Dashboard "notable" band lower bound
+  block: 0.70                         # Dashboard "severe" band lower bound

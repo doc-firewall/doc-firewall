@@ -53,10 +53,19 @@ def main():
         profile="strict" # Other options: "balanced", "lenient"
     )
 
-    # Customize thresholds
-    config.thresholds.flag = 0.20  # Flag earlier (default is 0.35)
-    config.thresholds.block = 0.60 # Block earlier (default is 0.70)
-    
+    # Customize dashboard risk-score bands (informational only — see note below).
+    # Defaults: thresholds.flag=0.25, thresholds.block=0.70.
+    config.thresholds.flag = 0.20
+    config.thresholds.block = 0.60
+    #
+    # Since doc-firewall 0.4.4 the scan VERDICT is derived from finding
+    # CLASSES (BLOCK / REVIEW / INFO), not from risk_score crossing a
+    # threshold. Setting `thresholds.flag` / `thresholds.block` only
+    # affects how the numeric score is labeled in dashboards — it does
+    # NOT change which files BLOCK. To force a file to BLOCK, the scanner
+    # must produce a finding with `verdict_class=BLOCK` (YARA hit, EICAR,
+    # `javascript:` URI, embedded PE/ELF, etc.). See concepts/risk-scoring.
+
     # Customize limits
     config.limits.max_pages = 50   # Reject large PDFs
 

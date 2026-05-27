@@ -5,11 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.5] - 2026-05-27
+
+### Changed
+
+- **Verdict model: class-based, not score-based.** New `VerdictClass` (`BLOCK` / `REVIEW` / `INFO`) on every `Finding`. `BLOCK` now requires definitive evidence (YARA, EICAR, AV-infected, `javascript:`/`data:`/`file:`/`vbscript:` URIs, CSV DDE pipes, ODF `macro://`, RTF `\javascript`, embedded PE/ELF/Mach-O/ISO, JBIG2-oversized, XLM+veryHidden, etc.); heuristic findings cap at `FLAG`. `risk_score` is still computed for analytics but no longer gates the verdict.
+
+### Added
+
+- **Plain-language explanations.** `Finding.explain` is rewritten to plain prose; the original technical text is preserved in the new `Finding.technical_detail` field. Driven by a central mapping in `detectors/explanations.py` covering the 15 most-common finding types. SIEM consumers should key on `technical_detail` (or `title`) instead of `explain`.
+
+### Fixed
+
+- **Real-world FP cluster (8 detector tightenings).** Fast-scan `/URI` duplicate, T10 imperative-at-agent rule, T8 SQL-in-metadata binary-content guard, T7 JPEG/PNG file-type guard, fast-scan T4 keyword pruning (`system prompt`/`reveal your` etc.), T8 PII VIN/IBAN format validation, T5/T9 Docling artifact stripping (`<!-- image -->`), T12 "call us at <number>" pruning. Drops verdict on legitimate resumes, IRS notices, and edited PDFs from BLOCK/FLAG to ALLOW/FLAG.
+
+### Documentation
+
+- Rewrote `concepts/risk-scoring.md` for the class-based model; reframed `risk_model.md` as analytics bands; added new `concepts/policies.md` (four bundled policies + schema reference); updated `quickstart.md` Finding-fields table; updated `examples/doc_firewall_config.yaml` for 5-minute timeouts and `docling_device`.
+
 ## [0.4.4] - 2026-05-25
 
 ### Fixed
 
-- **Resume / real-world FP cluster** — `/URI` and `TargetMode="External"` no longer flag plain `http(s)`/`mailto`/`tel` hyperlinks (only `javascript:`/`data:`/`file:`/`vbscript:`/`jar:`/IP-literal targets fire T2); PDF structural tokens (`endobj`, `endstream`, `xref`, …) added to `_STOP_WORDS` so they no longer count as keyword stuffing; `repeated_seq` now rejects pure-numeric and single-char runs (PDF coordinate matrices like `0 0 0 0 …`) and emits richer evidence (`repeated_token`, `repeat_count`, `context`).
+- **Resume / real-world FP cluster** — `/URI` and `TargetMode="External"` no longer flag plain `http(s)`/`mailto`/`tel` hyperlinks (only `javascript:`/`data:`/`file:`/`vbscript:`/`jar:`/IP-literal targets fire T2). PDF structural tokens (`endobj`, `endstream`, `xref`, …) added to `_STOP_WORDS` so they no longer count as keyword stuffing; `repeated_seq` now rejects pure-numeric and single-char runs (PDF coordinate matrices like `0 0 0 0 …`) and emits richer evidence (`repeated_token`, `repeat_count`, `context`).
 - **`act as a` matched partial-word `imp[act as a]`** — Aho-Corasick hits now respect word boundaries when the phrase itself starts/ends with a word char; structural markers (`<tool_call>`, `[inst]`, `{{system}}`) still match as substrings.
 
 ### Changed

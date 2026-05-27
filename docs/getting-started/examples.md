@@ -13,37 +13,47 @@ This example demonstrates the simplest usage of DocFirewall: scanning a single f
     
     *Or inline version:*
     ```python
-    from doc_firewall import scan
-
-    # We use a sample file bundled with the examples
-    file_path = "examples/samples/T2_0000.docx"
-    print(f"Scanning {file_path}...")
-    
-    report = scan(file_path)
-
-    print("-" * 30)
-    print(f"Verdict:    {report.verdict}")
-    print(f"Risk Score: {report.risk_score:.2f}")
-    print(f"Findings:   {len(report.findings)}")
-    print("-" * 30)
-
-    for f in report.findings:
-        print(f"[{f.severity}] {f.title}: {f.explain}")
+    --8<-- "examples/01_basic_scan.py"
     ```
 
 === "Output"
     ```text
     Scanning examples/samples/T2_0000.docx...
     ------------------------------
-    Verdict:    Verdict.BLOCK
-    Risk Score: 0.91
-    Findings:   4
+    Verdict:    Verdict.FLAG
+    Risk Score: 0.45
+    Findings:   3
     ------------------------------
-    [Severity.MEDIUM] DOCX External Relationship Found: Found 'TargetMode="External"' in word/_rels/document.xml.rels, indicating external content fetch.
-    [Severity.MEDIUM] Embedded Object Found: Found embedded object 'word/embeddings/obj1.bin'.
-    [Severity.MEDIUM] DOCX contains external relationships: DOCX relationship files reference external targets.
-    [Severity.MEDIUM] DOCX contains embedded objects: Embedded objects can carry active content or payloads.
+    [Severity.MEDIUM] DOCX contains embedded objects
+      What this means : This DOCX has another file packaged inside it. Most of
+                        the time these are benign (charts, embedded spreadsheets),
+                        but attackers also use them to smuggle malware past
+                        email scanners that only look at the outer DOCX.
+      Under the hood  : word/embeddings/* contains a non-text payload —
+                        could be an Equation, Excel sheet, OLE object, or
+                        binary file. Review the evidence list for the
+                        embedded filenames.
+    [Severity.MEDIUM] DOCX contains external relationships (links/resources)
+      What this means : This DOCX references content stored outside the file
+                        itself — for example, a template at a URL, or an
+                        embedded image hosted on a remote server. Most of these
+                        are benign hyperlinks; only links to non-standard
+                        schemes (javascript:, data:, file:, ...) are flagged
+                        as actively malicious.
+      Under the hood  : Word relationships file (word/_rels/...) carries
+                        TargetMode="External" entries. See the evidence list
+                        for the actual target URLs.
+    [Severity.LOW] Personally Identifiable Information (PII) Detected
+      What this means : This document contains personally identifiable
+                        information (PII) — things like phone numbers, email
+                        addresses, account numbers, or government IDs. ...
     ```
+    !!! note "Verdict semantics (0.4.4+)"
+        Notice the verdict above is **FLAG**, not BLOCK — despite the multiple findings.
+        Under the class-based verdict model, BLOCK requires *definitive* evidence
+        (YARA hit, EICAR, `javascript:` URI, embedded executable, etc.); the
+        heuristic findings here only escalate to FLAG. See
+        [Risk Scoring & Verdict Model](../concepts/risk-scoring.md).
 
 ## 2. Custom Configuration
 

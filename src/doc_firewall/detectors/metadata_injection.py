@@ -5,8 +5,28 @@ from .base import Detector, pattern_cache_key
 from ..analyzers.base import ParsedDocument
 from ..config import ScanConfig
 from ..report import Finding
-from ..enums import ThreatID, Severity
+from ..enums import ThreatID, Severity, VerdictClass
 from ..utils.unicode_norm import normalize_text
+
+
+def _looks_like_text(content: str, min_printable_ratio: float = 0.85) -> bool:
+    """True when content is plausibly natural language.
+
+    PDF metadata extractors occasionally leak undecoded compressed /
+    encrypted stream bytes into fields like /Author or /Keywords. Short
+    SQL-injection regexes (``1=1``, ``select *``) happily match coincidental
+    byte sequences in that noise (an EICAR-shaped FP). Gate all regex-based
+    metadata checks on this so they only run against fields that actually
+    look like text. The length-based DoS check is exempt — it counts bytes
+    regardless of content.
+    """
+    if not content:
+        return False
+    printable = sum(
+        1 for c in content
+        if c.isprintable() or c in "\t\n\r"
+    )
+    return (printable / len(content)) >= min_printable_ratio
 
 
 class MetadataInjectionDetector(Detector):
@@ -80,6 +100,12 @@ class MetadataInjectionDetector(Detector):
                     )
                 )
 
+            # All remaining checks below are regex-based and prone to
+            # coincidental matches in undecoded PDF stream bytes. Skip
+            # non-text content entirely.
+            if not _looks_like_text(content):
+                continue
+
             # 2. Syntax Injection (HTML/JS)
             if re.search(
                 r"<script|javascript:|vbscript:|onload=|onerror=",
@@ -98,6 +124,10 @@ class MetadataInjectionDetector(Detector):
                         evidence={"snippet": content[:100], "malicious_text": content[:250]},
                         module=self.name,
                         confidence=1.0,
+                        # <script> / javascript:/vbscript: / onload=/onerror=
+                        # in a metadata field that already passed the printable-
+                        # text gate above has no legitimate use — definitive.
+                        verdict_class=VerdictClass.BLOCK,
                     )
                 )
 

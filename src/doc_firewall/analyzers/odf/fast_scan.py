@@ -24,7 +24,7 @@ import zipfile
 from typing import List
 
 from ...config import ScanConfig
-from ...enums import ThreatID, Severity
+from ...enums import ThreatID, Severity, VerdictClass
 from ...report import Finding
 from ...logger import get_logger
 
@@ -265,6 +265,9 @@ def _scan_content_xml(content: bytes, findings: list[Finding], config: ScanConfi
             module="fast_scan.odf.macro_uri",
             cve="CVE-2023-2255",
             mitre_technique="T1203",
+            # Definitive RCE vector — no legitimate document needs a
+            # macro:// URI in a hyperlink; always BLOCK.
+            verdict_class=VerdictClass.BLOCK,
         ))
 
     # T2: external hyperlinks

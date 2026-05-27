@@ -67,7 +67,12 @@ _ACTION_RE = re.compile(
     r'(?:enter|input|type|submit|send)\s+(?:your\s+)?(?:password|credentials?|'
     r'login|pin|ssn|social\s+security|otp|verification\s+code|'
     r'bank\s+(?:account|details?)|credit\s+card)|'
-    r'call\s+(?:this\s+number|us\s+(?:now|immediately|at))|'
+    # G.6 precision fix: dropped bare "call us at <number>" — legitimate
+    # government / customer-service documents (IRS notices, bank statements,
+    # utility bills) routinely contain "call us at 800-XXX-XXXX" as benign
+    # contact info, not as an action demand. The phishing pattern is "call
+    # us NOW" / "call us IMMEDIATELY" — keep those.
+    r'call\s+us\s+(?:now|immediately|right\s+away)|'
     r'reply\s+with\s+(?:your\s+)?(?:password|code|pin|ssn|account)|'
     r'verify\s+(?:your\s+)?(?:account|identity|information|details?)|'
     r'confirm\s+(?:your\s+)?(?:account|identity|details?|password)|'

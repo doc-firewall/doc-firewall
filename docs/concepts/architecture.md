@@ -26,12 +26,16 @@ graph TD
     G --> I
     G --> J
     
-    H --> K["Risk Scoring"]
+    H --> K["Findings (each carries verdict_class)"]
     I --> K
     J --> K
-    
-    K --> L["Final Verdict"]
+
+    K --> L["Verdict Resolver"]
+    L --> M["Final Verdict (ALLOW / FLAG / BLOCK)"]
+    K --> N["Risk Score (analytics)"]
 ```
+
+The verdict is derived from finding **classes**, not from the risk score. Each finding produced by a detector carries a `verdict_class` of `BLOCK` (definitive evidence — YARA hit, EICAR, `javascript:` URI, embedded PE/ELF, etc.), `REVIEW` (heuristic / suggestive signal), or `INFO` (recorded for audit only). The resolver returns `BLOCK` if any finding is BLOCK-class, otherwise `FLAG` if any is REVIEW-class, otherwise `ALLOW`. The risk score is computed in parallel for analytics dashboards but does not gate the verdict. See [Risk Scoring & Verdict Model](risk-scoring.md) for details.
 
 ## 1. Input Interface
 Documents enter via Python function calls (`scan()`), CLI, or REST API wrappers.

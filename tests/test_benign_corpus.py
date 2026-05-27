@@ -781,6 +781,229 @@ class TestBenignCorpus(unittest.TestCase):
             "pdf_numeric_coordinate_run",
         )
 
+    # ── 18d. Resume describing RAG / fetch systems near a contact URL ──────
+    #
+    # Real-world FP: software engineers who have built RAG / document-
+    # ingestion pipelines describe that work on their resume, often near a
+    # LinkedIn / GitHub link. The bare "URL within 500 chars of fetch verb"
+    # rule for T10 indirect-injection false-fires on this. The tightened
+    # rule (imperative-at-agent / politeness-marker / sentence-start) must
+    # NOT match this passive-voice resume prose.
+
+    def test_resume_with_rag_fetch_description(self) -> None:
+        self._assert_clean(
+            """
+            Gliffton Mendes — Staff Software Engineer
+
+            Contact
+            Email: gliffton@example.com
+            LinkedIn: https://www.linkedin.com/in/gliffton/
+            GitHub: https://github.com/gliffton
+
+            Selected Work
+
+            HR AI Center of Excellence — Acme Inc (2024–present)
+            Built a document-intake platform used by multiple teams to ingest
+            documents with custom metadata defined per tenant. Designed the
+            service to retrieve resume PDFs from S3, fetch the latest BERT
+            classifier weights on startup, download tenant-specific YARA
+            rules at runtime, and load configuration from a versioned
+            object store. The system can pull data from upstream HRIS
+            providers and read from on-premise file shares behind a VPN.
+
+            Senior Engineer — Beacon Software (2021–2024)
+            Maintained an ingestion pipeline that imports from third-party
+            APIs and writes to a data warehouse. Implemented retry policies,
+            dead-letter queues, and observability dashboards. Mentored two
+            junior engineers and contributed to internal platform
+            documentation.
+
+            Technical Skills
+            Languages: Python, Go, TypeScript
+            Frameworks: FastAPI, React, LangChain, LlamaIndex
+            """,
+            "resume_with_rag_fetch_description",
+        )
+
+    # ── 18d-quad. PII detector must validate VIN / IBAN format
+    #
+    # Real-world FP: PDF internal object names (17-char alphanumeric like
+    # "ParentTreeNextKey") false-fire the VIN regex. Timestamps like
+    # "20260507001237Z00" too. Short mixed-case strings ("OF71M1C4n")
+    # false-fire the IBAN regex. The tightened patterns now require:
+    #   - VIN: explicit label prefix ("VIN:", "Vehicle ID:", "Chassis:")
+    #   - IBAN: known ISO 3166-1 country code + ≥15 total chars + uppercase
+
+    def test_pii_pdf_object_names_not_flagged_as_vin(self) -> None:
+        self._assert_clean(
+            "Document body. PDF internal: ParentTreeNextKey FontEncoderConfigA "
+            "MarkInfoAnnotationRoot DocumentStructureTree. Timestamp 20260507001237Z00. "
+            "Hash AABBCCDDEEFF11223. None of these are vehicle identification numbers "
+            "or international bank account numbers — they are document internals "
+            "and identifiers that happen to be 14-17 chars alphanumeric.",
+            "pii_pdf_internals_not_vin_iban",
+        )
+
+    def test_pii_real_vin_with_label_still_fires(self) -> None:
+        from doc_firewall.detectors.pii import PiiDetector
+        from doc_firewall.enums import ThreatID
+        cfg = ScanConfig()
+        det = PiiDetector()
+        doc = _parsed(
+            "Vehicle history report. VIN: 1HGBH41JXMN109186 — 2021 Honda Civic. "
+            "Owner verified the VIN matches the title."
+        )
+        findings = det.run(doc, cfg)
+        assert any(
+            f.threat_id == ThreatID.T8_METADATA_INJECTION
+            and "VIN" in str(f.evidence.get("matches", {}))
+            for f in findings
+        ), f"Label-prefixed VIN should still fire; got {[f.evidence for f in findings]}"
+
+    def test_pii_real_iban_still_fires(self) -> None:
+        from doc_firewall.detectors.pii import PiiDetector
+        from doc_firewall.enums import ThreatID
+        cfg = ScanConfig()
+        det = PiiDetector()
+        # A real-format Norway IBAN (15 chars, country code NO)
+        doc = _parsed(
+            "Wire transfer details: please remit to IBAN NO9386011117947. "
+            "Bank confirms account is active and accepting deposits."
+        )
+        findings = det.run(doc, cfg)
+        assert any(
+            f.threat_id == ThreatID.T8_METADATA_INJECTION
+            and "IBAN" in str(f.evidence.get("matches", {}))
+            for f in findings
+        ), f"Real uppercase IBAN with valid country code should still fire; got {[f.evidence for f in findings]}"
+
+    # ── 18d-quint. T9/T5 must skip Docling extraction artifacts
+    #
+    # Real-world FP: Docling inserts `<!-- image -->` placeholders at every
+    # figure boundary when converting PDF/DOCX to markdown. A document with
+    # many figures has "image" as the dominant content token. The pre-fix
+    # frequency check called this "ATS keyword stuffing". The new
+    # `_strip_extraction_noise` helper removes comments before counting.
+
+    def test_t9_ignores_docling_image_placeholders(self) -> None:
+        # Direct exercise of the noise-stripper: a focused unit test on the
+        # frequency-counter path. A document with many `<!-- image -->`
+        # placeholders should NOT register "image" as the dominant token.
+        from doc_firewall.detectors.ats_manipulation import (
+            _strip_extraction_noise,
+        )
+        # 30 Docling figure placeholders interleaved with varied prose
+        text = "Quarterly performance review for the engineering organisation.\n"
+        for i in range(30):
+            text += f"Section {i}. The team delivered initiative {i} on schedule.\n<!-- image -->\n"
+        stripped = _strip_extraction_noise(text)
+        # After stripping, "image" should appear zero times
+        assert "image" not in stripped.lower(), (
+            f"Image placeholders not stripped: {stripped[:200]!r}"
+        )
+        # And `<!-- ... -->` should be gone
+        assert "<!--" not in stripped
+
+    # ── 18d-sext. T12 must not flag legitimate government contact info
+    #
+    # Real-world FP: IRS / state-agency / utility-bill documents combine
+    # authority claims ("IRS", "Department of Motor Vehicles") with phone
+    # contact info ("call us at 800-XXX-XXXX") — the old action_demand
+    # regex matched "call us at" as a phishing CTA. Pruned in this release.
+
+    def test_t12_ignores_legitimate_irs_contact_info(self) -> None:
+        self._assert_clean(
+            "Internal Revenue Service — Notice of Acceptance. Your election "
+            "has been processed. Find tax forms or publications by visiting "
+            "IRS.gov/Forms or by calling 800-TAX-FORM (800-829-3676). Call "
+            "us at 800-829-4933 if you cannot find what you need online. If "
+            "you prefer, you can write to the address at the top of this "
+            "notice. This determination letter is for your records.",
+            "t12_legitimate_irs_contact_info",
+        )
+
+    # ── 18d-sept. T10 indirect injection must not fire on "you can download"
+    #
+    # Real-world FP: IRS / government / customer-service docs say "You can
+    # download X at https://...". The old agent-addressed pattern matched
+    # "you" + "can" + "download" as an agent instruction. Tightened to
+    # require AI/agent/model addressing with a directive modal.
+
+    def test_t10_ignores_you_can_download_in_irs_doc(self) -> None:
+        self._assert_clean(
+            "Internal Revenue Service — EIN Confirmation. The service center "
+            "will notify the LLC as to the acceptance or non-acceptance of "
+            "its election. The LLC should generally receive a determination "
+            "within 60 days after filing Form 8832 or Form 2553. "
+            "You can download IRS forms, publications, and tax returns at "
+            "https://www.irs.gov/formspubs. If you need to make changes to "
+            "your organization's information, mail the information to the "
+            "address provided at https://www.irs.gov/businesses.",
+            "t10_you_can_download_irs",
+        )
+
+    # ── 18d-bis. Marketing / research doc that legitimately mentions
+    # "system prompt" / "system instruction" / "reveal your X" must not
+    # trigger T4 prompt-injection. These bare phrases were over-broad in
+    # the fast-scan keyword list and false-fired on any LLM-security
+    # content (research papers, this project's own marketing copy, etc.).
+
+    def test_llm_security_marketing_copy(self) -> None:
+        # Exercises the fast-scan-keyword fix: bare descriptive terms like
+        # "system prompt", "system instruction", "reveal your X" must not
+        # fire T4 on legitimate security / research / marketing content.
+        # The test deliberately avoids quoting any actual adversarial phrase
+        # (those *should* fire on the deep-scan detectors and are tested
+        # elsewhere) — we only check that the descriptive terms alone are
+        # not enough to escalate the verdict.
+        self._assert_clean(
+            """
+            Secure Document Intake for LLM Pipelines.
+
+            Modern AI applications process untrusted document uploads at
+            scale. A poisoned document can exfiltrate the system prompt
+            or trick the assistant into bypassing its guardrails.
+
+            This guide describes the threat surface and shows how to wire
+            our scanner into a LangChain or LlamaIndex pipeline. We cover
+            attacks that try to reveal your model's hidden configuration,
+            embed a system instruction in document metadata, or exfiltrate
+            sensitive runtime state.
+
+            Descriptive technical terms appear constantly in legitimate
+            security content (whitepapers, research, marketing) and the
+            scanner should not block on their bare presence — it must
+            require a real adversarial phrase or behavior.
+            """,
+            "llm_security_marketing_copy",
+        )
+
+    # ── 18e. Metadata-injection detector must skip binary garbage ──────────
+    #
+    # Real-world FP: some PDFs leak undecoded compressed / encrypted stream
+    # bytes into metadata fields like /Author. Short SQL-injection regexes
+    # (``1=1``, ``select *``) coincidentally match in noise. The metadata
+    # detector now requires fields to be ≥85% printable before running its
+    # regex checks. Verify by passing a high-entropy binary blob as a
+    # metadata title — it must NOT trigger script/SQL/T4 injection findings.
+
+    def test_metadata_binary_garbage_not_flagged(self) -> None:
+        self._assert_clean(
+            "Resume content here. Normal English prose. No injection markers.",
+            "metadata_binary_garbage",
+            metadata={
+                # 200 bytes of undecoded PDF stream content. Contains '1=1'
+                # and other accidental SQL-shaped tokens in the binary noise.
+                "title": (
+                    "v]jj\x18>fOqvn2\x13v\xb8+\x1b6޸7&M2O{(!cb)\x03"
+                    "iM5\x1eL6x$mF\x0c\x1a\x1f\x06?4~\x14\\\x1f\\o8q0ǘ"
+                    "\x16$1=1Dpsp1#\x173\x0c\x080~\x162x*X\x14<k<Ld7}&1w"
+                    "\x1dU\x14ٽ7;)@ B\x10Q@TĆ\x08\x14{>\x0bgħ"
+                    "\t\x02O\xc3\xa9\xa1\x01\x02"
+                ),
+            },
+        )
+
     # ── 19. Academic paper discussing ATS systems (legitimate T9 vocab) ────
     #
     # R4 companion: legitimate discussion of ATS manipulation in an academic

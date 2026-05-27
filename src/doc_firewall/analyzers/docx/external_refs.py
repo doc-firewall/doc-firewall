@@ -11,7 +11,7 @@ except ImportError as e:
         "Install it with: pip install defusedxml"
     ) from e
 from ...report import Finding
-from ...enums import ThreatID, Severity
+from ...enums import ThreatID, Severity, VerdictClass
 from ...config import ScanConfig
 from ..base import ParsedDocument
 
@@ -104,6 +104,9 @@ def detect_docx_external_refs(doc: ParsedDocument, config: ScanConfig) -> List[F
                 },
                 module="docx.external_refs",
                 confidence=0.9,
+                # Non-standard scheme in an external relationship has no
+                # legitimate use in a normal docx — definitive.
+                verdict_class=VerdictClass.BLOCK,
             )
         )
     return findings

@@ -2,7 +2,7 @@ from __future__ import annotations
 import re
 import zipfile
 from typing import List
-from ...enums import ThreatID, Severity
+from ...enums import ThreatID, Severity, VerdictClass
 from ...report import Finding
 from ...config import ScanConfig
 from ...logger import get_logger
@@ -284,6 +284,9 @@ def fast_scan_docx(file_path: str, config: ScanConfig) -> List[Finding]:
                             evidence={"filename": z.filename, "extension": _emb_ext},
                             confidence=0.90,
                             module="fast_scan.docx.embedded_archive",
+                            # Embedded .exe/.dll/.ps1/.vbs/.bat/.hta etc.
+                            # in a DOCX has no legitimate use — definitive.
+                            verdict_class=VerdictClass.BLOCK,
                         )
                     )
                 elif _emb_ext == "zip" and z.file_size < 8 * 1024 * 1024:
@@ -353,6 +356,8 @@ def fast_scan_docx(file_path: str, config: ScanConfig) -> List[Finding]:
                                     },
                                     confidence=0.85,
                                     module="fast_scan.docx.rels",
+                                    # Mirrors docx/external_refs.py — definitive.
+                                    verdict_class=VerdictClass.BLOCK,
                                 )
                             )
                 except Exception as e:

@@ -56,8 +56,15 @@ _PII_PATTERNS: list[tuple[str, str, Severity, int | None]] = [
     # 11. Certificate / license numbers
     (r"\b(?:license\s+(?:number|no|#)|driver'?s?\s+license)[:\s#]{1,4}[A-Z0-9-]{5,}\b",
      "License Number", Severity.MEDIUM, 11),
-    # 12. Vehicle identifiers — VIN
-    (r"\b(?<![A-Z0-9])[A-HJ-NPR-Z0-9]{17}(?![A-Z0-9])\b",
+    # 12. Vehicle identifiers — VIN.
+    #
+    # IMPORTANT: a bare 17-char alphanumeric run is FAR too common to flag
+    # as a VIN. PDF internal object names ("ParentTreeNextKey"), timestamps
+    # ("20260507001237Z00"), random tokens, generated IDs — all match. So
+    # we require an explicit VIN-ish label prefix within a short distance.
+    # Pattern mirrors the SSN / license number patterns below.
+    (r"\b(?:VIN|vehicle\s+(?:id|identification|identifier)|chassis|frame\s+(?:number|no|#))"
+     r"[:\s#]{1,4}(?-i:[A-HJ-NPR-Z0-9]{17})(?![A-Z0-9])\b",
      "Vehicle Identification Number (VIN)", Severity.LOW, 12),
     # 13. Device identifiers — serial number labelled
     (r"\b(?:serial\s+(?:number|no|#)|s/n)[:\s#]{1,4}[A-Z0-9-]{6,}\b",
@@ -80,9 +87,26 @@ _PII_PATTERNS: list[tuple[str, str, Severity, int | None]] = [
         Severity.HIGH,
         None,
     ),
-    # IBAN — international bank account
-    (r"\b[A-Z]{2}\d{2}[A-Z0-9]{4,30}\b",
-     "IBAN", Severity.HIGH, None),
+    # IBAN — international bank account.
+    #
+    # Tightened from the previous `[A-Z]{2}\d{2}[A-Z0-9]{4,30}` which fired
+    # on any noise like "OF71M1C4n" (the case-insensitive flag let lowercase
+    # tails through; the 4-char minimum body was wildly under-spec). Real
+    # IBANs are 15-32 chars total and start with a known ISO 3166-1 country
+    # code. We require:
+    #   - Uppercase-only country code (overrides global IGNORECASE)
+    #   - Country code must be a real IBAN-using country
+    #   - Total length ≥ 15 (Norway IBAN is 15, the shortest valid)
+    #   - Uppercase-only body (real IBANs are always emitted uppercase)
+    (
+        r"\b(?-i:"
+        r"(?:AD|AE|AL|AT|AZ|BA|BE|BG|BH|BI|BR|BY|CH|CR|CY|CZ|DE|DK|DO|EE|"
+        r"EG|ES|FI|FO|FR|GB|GE|GI|GL|GR|GT|HR|HU|IE|IL|IQ|IS|IT|JO|KW|KZ|"
+        r"LB|LC|LI|LT|LU|LV|LY|MC|MD|ME|MK|MR|MT|MU|NL|NO|OM|PK|PL|PS|PT|"
+        r"QA|RO|RS|RU|SA|SC|SD|SE|SI|SK|SM|ST|SV|TL|TN|TR|UA|VA|VG|XK)"
+        r")\d{2}(?-i:[A-Z0-9]){11,30}\b",
+        "IBAN", Severity.HIGH, None,
+    ),
 ]
 
 

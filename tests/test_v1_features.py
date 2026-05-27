@@ -34,26 +34,109 @@ from doc_firewall.scanner import Scanner
 
 class TestRiskModel(unittest.TestCase):
     def test_risk_model_probabilistic(self):
+        """Risk score calculation still uses the probabilistic combine —
+        retained for analytics. The verdict however no longer derives from
+        the score (see test_verdict_is_class_based_not_score_based)."""
         config = ScanConfig()
         model = RiskModel(config)
-        
+
         # Two findings with explicit confidence=1.0 (calibrated detectors)
         # Prob 1 = 0.9 * 0.8 * 1.0 = 0.72
         # Prob 2 = 0.8 * 0.8 * 1.0 = 0.64
         # Risk = 1 - (1-0.72)*(1-0.64) = 1 - (0.28 * 0.36) = 1 - 0.1008 = 0.8992
-        
+
         findings = [
             Finding(ThreatID.T2_ACTIVE_CONTENT, Severity.HIGH, "F1", "E1",
                     confidence=1.0, module="test"),
             Finding(ThreatID.T4_PROMPT_INJECTION, Severity.HIGH, "F2", "E2",
                     confidence=1.0, module="test")
         ]
-        
+
         score = model.calculate_risk(findings)
         self.assertAlmostEqual(score, 0.8992, places=4)
-        c_verdict = model.get_verdict(score)
-        # 0.8992 > 0.70 -> BLOCK
-        self.assertEqual(c_verdict, Verdict.BLOCK)
+        # New semantics: these are REVIEW-class (default), so verdict is
+        # FLAG even though the score is 0.8992 (was BLOCK pre-0.4.4).
+        c_verdict = model.get_verdict(score, findings)
+        self.assertEqual(c_verdict, Verdict.FLAG)
+
+    def test_enrich_findings_plain_language(self):
+        """enrich_findings() rewrites explain to plain language and preserves
+        the original technical text in technical_detail for findings the
+        mapping recognises; leaves others untouched."""
+        from doc_firewall.detectors.explanations import enrich_findings
+        original_oa = "Found suspicious token '/OpenAction' in raw file stream."
+        oa_finding = Finding(
+            ThreatID.T2_ACTIVE_CONTENT, Severity.HIGH,
+            "Suspicious PDF Token found: /OpenAction",
+            original_oa,
+            evidence={"token": "/OpenAction"},
+            module="fast_scan.pdf.tokens",
+        )
+        # Finding NOT in the mapping — should pass through unchanged
+        original_passthrough = "Some bespoke detector message."
+        passthrough = Finding(
+            ThreatID.T9_ATS_MANIPULATION, Severity.LOW,
+            "Bespoke Detector Output",
+            original_passthrough,
+            module="some.custom.module",
+        )
+
+        enrich_findings([oa_finding, passthrough])
+
+        # /OpenAction should be enriched
+        assert "automatically the moment it's opened" in oa_finding.explain, (
+            f"Plain explain not applied; got: {oa_finding.explain}"
+        )
+        assert oa_finding.technical_detail is not None
+        assert "/OpenAction" in oa_finding.technical_detail
+        # Bespoke finding should pass through
+        assert passthrough.explain == original_passthrough
+        assert passthrough.technical_detail is None
+
+    def test_verdict_is_class_based_not_score_based(self):
+        """The verdict comes from finding classes, not from risk_score
+        magnitude. A BLOCK-class finding forces BLOCK regardless of score;
+        a high score with only REVIEW findings stays at FLAG; only
+        INFO/empty stays ALLOW."""
+        from doc_firewall.enums import VerdictClass
+        config = ScanConfig()
+        model = RiskModel(config)
+
+        # 1. Single BLOCK-class finding with low confidence → BLOCK
+        block_findings = [
+            Finding(ThreatID.T1_MALWARE, Severity.HIGH, "YARA hit", "matched rule X",
+                    confidence=0.5, module="test",
+                    verdict_class=VerdictClass.BLOCK),
+        ]
+        self.assertEqual(
+            model.get_verdict(model.calculate_risk(block_findings), block_findings),
+            Verdict.BLOCK,
+        )
+
+        # 2. Many REVIEW findings with high cumulative score → FLAG (not BLOCK)
+        many_review = [
+            Finding(ThreatID.T3_OBFUSCATION, Severity.HIGH, f"F{i}", "E",
+                    confidence=0.9, module="test")
+            for i in range(5)
+        ]
+        score = model.calculate_risk(many_review)
+        self.assertGreater(score, 0.7)  # would have BLOCKed under old model
+        self.assertEqual(
+            model.get_verdict(score, many_review),
+            Verdict.FLAG,
+        )
+
+        # 3. Only INFO-class findings → ALLOW + zero risk score
+        info_findings = [
+            Finding(ThreatID.T3_OBFUSCATION, Severity.MEDIUM, "Info1", "E",
+                    confidence=0.9, module="test",
+                    verdict_class=VerdictClass.INFO),
+        ]
+        self.assertEqual(model.calculate_risk(info_findings), 0.0)
+        self.assertEqual(
+            model.get_verdict(0.0, info_findings),
+            Verdict.ALLOW,
+        )
 
     def test_risk_model_default_confidence(self):
         """Findings without an explicit confidence use the neutral default (0.5),

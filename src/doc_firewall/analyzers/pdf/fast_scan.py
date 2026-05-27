@@ -3,7 +3,7 @@ import re
 import math
 import zlib
 from typing import List
-from ...enums import ThreatID, Severity
+from ...enums import ThreatID, Severity, VerdictClass
 from ...report import Finding
 from ...config import ScanConfig
 from ...logger import get_logger
@@ -142,7 +142,12 @@ def _detect_xobject_cycles(data: bytes) -> bool:
 
     return any(dfs(n) for n in list(graph) if color.get(n, WHITE) == WHITE)
 
-# Tokens to watch for in raw stream
+# Tokens to watch for in raw stream. /URI and /AcroForm are intentionally
+# excluded — a /URI is just a hyperlink (resumes and any normal PDF have
+# mailto: / https:// references), and a form by itself is not malicious.
+# /URI is handled separately below by _scan_suspicious_uris() which only
+# flags javascript:/data:/file:/vbscript:/jar:/IP-literal targets.
+# Mirror of pdf/active_content.py — kept in sync.
 SUSPICIOUS_TOKENS = [
     b"/JavaScript",
     b"/JS",
@@ -151,9 +156,7 @@ SUSPICIOUS_TOKENS = [
     b"/Launch",
     b"/EmbeddedFile",
     b"/Filespec",
-    b"/URI",
     b"/Encrypt",
-    b"/AcroForm",
     # B.2: XFA forms, form-action types, and sound actions — data-exfiltration
     # and remote-trigger vectors not covered by the base token set.
     b"/XFA",
@@ -169,6 +172,35 @@ SUSPICIOUS_TOKENS = [
     b"/GoToE",         # GoTo-Embedded action — used in document-smuggling chains
     b"/JBIG2Decode",   # CVE-2021-30860 carrier (FORCEDENTRY/Pegasus)
 ]
+
+# URL schemes that should never appear in a benign PDF hyperlink. Mirrors
+# pdf/active_content.py — kept in sync. Plain http(s)/mailto/tel pass silently.
+_SUSPICIOUS_URI_SCHEMES_RE = re.compile(
+    rb"^(?:javascript|data|vbscript|file|jar):", re.IGNORECASE
+)
+_IP_LITERAL_HOST_RE = re.compile(
+    rb"^https?://(?:\d{1,3}\.){3}\d{1,3}", re.IGNORECASE
+)
+# Match a /URI ( ... ) entry. Cap inner capture so a malformed PDF can't
+# blow up the regex on a giant span.
+_URI_ENTRY_RE = re.compile(rb"/URI\s*\(([^)\\]{1,2000})\)")
+
+
+def _scan_suspicious_uris(data: bytes) -> list[dict]:
+    """Return a list of {target} for any /URI entries whose target uses a
+    suspicious scheme. Plain http(s)/mailto/tel hyperlinks return nothing."""
+    out: list[dict] = []
+    for m in _URI_ENTRY_RE.finditer(data):
+        target = m.group(1).strip()
+        if _SUSPICIOUS_URI_SCHEMES_RE.match(target) or _IP_LITERAL_HOST_RE.match(target):
+            try:
+                decoded = target.decode("latin-1", errors="replace")[:200]
+            except Exception:
+                decoded = "<unprintable>"
+            out.append({"target": decoded})
+            if len(out) >= 20:
+                break
+    return out
 
 # D.7: Tokens that warrant CRITICAL severity when found alongside an anomaly.
 _CVE_PDF_TOKENS = {
@@ -247,6 +279,33 @@ def fast_scan_pdf(file_path: str, config: ScanConfig) -> List[Finding]:
                 )
             )
 
+    # /URI is checked separately — only flag entries whose target uses a
+    # suspicious scheme (javascript:/data:/file:/vbscript:/jar:) or an
+    # IP-literal host. Plain http(s)/mailto/tel hyperlinks (LinkedIn, email,
+    # phone) are not flagged.
+    suspicious_uris = _scan_suspicious_uris(data)
+    if suspicious_uris:
+        findings.append(
+            Finding(
+                threat_id=ThreatID.T2_ACTIVE_CONTENT,
+                severity=Severity.HIGH,
+                title="PDF contains hyperlink with suspicious URL scheme",
+                explain=(
+                    "/URI entries reference javascript:, data:, file:, "
+                    "vbscript:, jar:, or IP-literal targets. Plain http(s)/"
+                    "mailto/tel hyperlinks are not flagged."
+                ),
+                evidence={
+                    "suspicious_uris": suspicious_uris,
+                    "malicious_text": suspicious_uris[0]["target"],
+                },
+                confidence=0.9,
+                module="fast_scan.pdf.uris",
+                # Same definitive bucket as the deep-scan path.
+                verdict_class=VerdictClass.BLOCK,
+            )
+        )
+
     # D.7: JBIG2 dimension anomaly — CVE-2021-30860 used a JBIG2 stream with
     # an oversized /Width to overflow a 32-bit integer in CoreGraphics.
     # Legitimate document images rarely exceed 10 000 px wide.
@@ -278,6 +337,9 @@ def fast_scan_pdf(file_path: str, config: ScanConfig) -> List[Finding]:
                         module="fast_scan.pdf.jbig2",
                         cve="CVE-2021-30860",
                         mitre_technique="T1203",
+                        # JBIG2 + dimension > 10K px is the CVE-2021-30860
+                        # (FORCEDENTRY) exploit signature — definitive.
+                        verdict_class=VerdictClass.BLOCK,
                     )
                 )
                 break
@@ -638,22 +700,27 @@ def fast_scan_pdf(file_path: str, config: ScanConfig) -> List[Finding]:
     # 2j. PDF Incremental Update Layers (B.3) — multiple %%EOF markers indicate
     # incremental saves.  Attackers use this to overlay a "clean" top layer over
     # malicious content that persists in earlier byte ranges (PDF shadow attack).
+    # Marked INFO because the *count* alone is uninformative — any PDF that's
+    # been edited and saved more than once has 2+ %%EOFs. A genuine shadow
+    # attack requires correlated divergent content across layers, which is a
+    # separate detector. Kept in the report for auditors who want to see it.
     eof_count = data.count(b"%%EOF")
     if eof_count > 1 and config.enable_obfuscation_checks:
         findings.append(
             Finding(
                 threat_id=ThreatID.T3_OBFUSCATION,
-                severity=Severity.MEDIUM,
+                severity=Severity.LOW,
                 title="PDF Incremental Update Layers",
                 explain=(
                     f"Detected {eof_count} %%EOF markers indicating incremental "
-                    "update layers. While legitimate for digital signatures, "
-                    "attackers use incremental updates to conceal content that "
-                    "persists in earlier byte ranges (PDF shadow attack)."
+                    "update layers. Legitimate for any document that has been "
+                    "edited and re-saved (or carries a digital signature). "
+                    "Recorded for audit only — not a verdict driver."
                 ),
                 evidence={"eof_count": eof_count},
                 confidence=0.65,
                 module="fast_scan.pdf.structure",
+                verdict_class=VerdictClass.INFO,
             )
         )
 

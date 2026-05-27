@@ -28,7 +28,7 @@ from typing import List
 from ...report import Finding
 from ..base import ParsedDocument
 from ...config import ScanConfig
-from ...enums import ThreatID, Severity
+from ...enums import ThreatID, Severity, VerdictClass
 
 
 # Regex patterns operating on raw PDF bytes
@@ -183,19 +183,23 @@ def detect_pdf_obfuscation(doc: ParsedDocument, config: ScanConfig) -> List[Find
     if suspicious:
         findings.append(Finding(
             threat_id=ThreatID.T3_OBFUSCATION,
-            severity=Severity.MEDIUM,
+            severity=Severity.LOW,
             confidence=0.75,
             title="Suspicious ToUnicode CMap — Font Substitution Attack",
             explain=(
                 f"PDF ToUnicode CMap analysis detected a potential font-substitution "
-                f"attack: {reason}. On-screen text may differ from extracted text, "
-                "hiding injection phrases from text-based scanners."
+                f"pattern: {reason}. NOTE: any modern PDF with embedded subset fonts "
+                "(Word / InDesign exports) shows this pattern legitimately. A true "
+                "font-substitution attack requires correlated divergence between "
+                "rendered glyphs and extracted text, which this structural check does "
+                "not measure. Recorded for audit only — not a verdict driver."
             ),
             evidence={
                 "cmap_entry_count": len(entries),
                 "reason": reason,
             },
             module="pdf.obfuscation.cmap",
+            verdict_class=VerdictClass.INFO,
         ))
 
     # D.16: /ActualText overlay — PDF operator that overrides the extracted
