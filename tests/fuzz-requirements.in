@@ -1,2 +1,17 @@
 atheris>=3.0.0
 -c ../requirements-docker.txt
+
+# The fuzz target imports doc_firewall.scanner, which eagerly loads these
+# runtime deps. They are duplicated from pyproject.toml [project.dependencies]
+# on purpose: dependabot re-resolves this file from the .in alone and dropped
+# the whole tree to just atheris in PR #115, breaking the nightly fuzz job.
+# Listing them here keeps regenerations self-sufficient. Versions stay aligned
+# via the -c constraint above. Keep in sync with pyproject.toml.
+numpy
+python-docx
+openpyxl
+defusedxml
+structlog
+pydantic
+pydantic-settings
+filelock
