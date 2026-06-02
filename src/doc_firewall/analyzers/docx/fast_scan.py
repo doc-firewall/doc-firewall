@@ -57,30 +57,61 @@ _TINY_FONT_RE = re.compile(rb'<w:sz\s+w:val="([0-4])"\s*/?>')
 #    (OOXML uses half-points: 1440 half-pts = 720pt ≈ 10 inches off the page)
 _OFFPAGE_POS_RE = re.compile(rb'<w:position\s+w:val="(-?\d+)"\s*/?>')
 
+# Capture <w:t...>BODY</w:t> for run-text extraction.
+_W_TEXT_RE = re.compile(rb"<w:t(?:\s[^>]*)?>([^<]*)</w:t>")
 
-def _check_hidden_text_xml(content: bytes) -> list[tuple[str, str]]:
-    """Return a list of (technique, detail) tuples for any hidden-text
-    patterns found in raw document.xml bytes."""
-    hits: list[tuple[str, str]] = []
 
-    if _VANISH_RE.search(content):
-        hits.append(("vanish", "<w:vanish/> property found"))
+def _extract_run_text(content: bytes, pos: int, limit: int = 250) -> str:
+    """Return concatenated <w:t> text inside the <w:r>...</w:r> run that
+    contains `pos` (the start of a hidden-text marker match). Empty string
+    if the run boundaries can't be located."""
+    open_a = content.rfind(b"<w:r ", 0, pos)
+    open_b = content.rfind(b"<w:r>", 0, pos)
+    run_open = max(open_a, open_b)
+    if run_open < 0:
+        return ""
+    tag_close = content.find(b">", run_open, run_open + 200)
+    if tag_close < 0:
+        return ""
+    run_end = content.find(b"</w:r>", pos)
+    if run_end < 0:
+        return ""
+    body = content[tag_close + 1 : run_end]
+    parts = [m.group(1).decode("utf-8", errors="replace")
+             for m in _W_TEXT_RE.finditer(body)]
+    return "".join(parts).strip()[:limit]
+
+
+def _check_hidden_text_xml(content: bytes) -> list[tuple[str, str, str]]:
+    """Return a list of (technique, detail, hidden_text) tuples for any
+    hidden-text patterns found in raw document.xml bytes. `hidden_text`
+    is the actual text content of the affected <w:r> run (empty if the
+    run text could not be extracted)."""
+    hits: list[tuple[str, str, str]] = []
+
+    m = _VANISH_RE.search(content)
+    if m:
+        hits.append(("vanish", "<w:vanish/> property found",
+                     _extract_run_text(content, m.start())))
 
     m = _WHITE_COLOR_RE.search(content)
     if m:
-        hits.append(("white_color", f"white text color: #{m.group(1).decode()}"))
+        hits.append(("white_color", f"white text color: #{m.group(1).decode()}",
+                     _extract_run_text(content, m.start())))
 
     m = _TINY_FONT_RE.search(content)
     if m:
         half_pts = int(m.group(1))
         pts = half_pts / 2
-        hits.append(("tiny_font", f"font size {pts}pt (≤2pt threshold)"))
+        hits.append(("tiny_font", f"font size {pts}pt (≤2pt threshold)",
+                     _extract_run_text(content, m.start())))
 
     m = _OFFPAGE_POS_RE.search(content)
     if m:
         val = int(m.group(1))
         if abs(val) >= 1440:
-            hits.append(("offpage", f"extreme vertical position: {val} half-pts"))
+            hits.append(("offpage", f"extreme vertical position: {val} half-pts",
+                         _extract_run_text(content, m.start())))
 
     return hits
 
@@ -494,7 +525,7 @@ def fast_scan_docx(file_path: str, config: ScanConfig) -> List[Finding]:
                         # ── H1: Extended hidden-text detection ────────────────
                         # Catches white-on-white, zero-size fonts, off-page
                         # positioning — techniques missed by vanish-only checks.
-                        for technique, detail in _check_hidden_text_xml(content):
+                        for technique, detail, hidden_text in _check_hidden_text_xml(content):
                             _TECHNIQUE_LABELS = {
                                 "vanish": "Hidden Text (w:vanish)",
                                 "white_color": "White-on-White Text",
@@ -502,6 +533,12 @@ def fast_scan_docx(file_path: str, config: ScanConfig) -> List[Finding]:
                                 "offpage": "Off-Page Text Positioning",
                             }
                             title = _TECHNIQUE_LABELS.get(technique, "Hidden Text")
+                            evidence = {"technique": technique, "detail": detail}
+                            if hidden_text:
+                                evidence["hidden_text"] = hidden_text
+                                evidence["malicious_text"] = hidden_text
+                            else:
+                                evidence["malicious_text"] = detail
                             findings.append(
                                 Finding(
                                     threat_id=ThreatID.T3_OBFUSCATION,
@@ -513,8 +550,7 @@ def fast_scan_docx(file_path: str, config: ScanConfig) -> List[Finding]:
                                         "invisible to readers but parsed by ATS "
                                         "systems."
                                     ),
-                                    evidence={"technique": technique, "detail": detail,
-                                              "malicious_text": detail},
+                                    evidence=evidence,
                                     module="fast_scan.docx.hidden_text",
                                     confidence=0.90,
                                 )

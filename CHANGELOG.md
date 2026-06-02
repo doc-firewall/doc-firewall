@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.6] - 2026-06-01
+
+### Fixed
+
+- **DOCX hidden-text findings now carry the actual hidden text.** Fast-scan `tiny_font` / `white_color` / `vanish` / `offpage` techniques walk back to the enclosing `<w:r>` and emit the run's `<w:t>` content as `evidence["hidden_text"]` (and `evidence["malicious_text"]`). Previously the only value carried was the technique description ("font size 0.5pt") with no way to see what the invisible text actually said.
+
 ## [0.4.5] - 2026-05-27
 
 ### Changed

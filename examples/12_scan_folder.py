@@ -36,12 +36,16 @@ def finding_to_dict(finding: Any) -> dict[str, Any]:
 VALID_PROFILES = {"lenient", "balanced", "strict"}
 
 
-def build_scan_config(config_cls: type, profile: str, mode: str) -> Any:
+def build_scan_config(config_cls: type, profile: str, mode: str, enable_pii: bool = True) -> Any:
     # `profile` selects the threshold/ML preset (lenient|balanced|strict).
     # `mode` is an example-local switch that only toggles antivirus.
     if profile not in VALID_PROFILES:
         profile = "strict"
-    return config_cls(profile=profile, enable_antivirus=(mode == "aggressive"))
+    return config_cls(
+        profile=profile,
+        enable_antivirus=(mode == "aggressive"),
+        enable_pii_checks=enable_pii,
+    )
 
 
 FIELDNAMES = [
@@ -51,10 +55,21 @@ FIELDNAMES = [
     "risk_score",
     "finding_count",
     "detected_threats",
+    "threat_id",
+    "title",
     "severity",
+    "verdict_class",
+    "module",
+    "confidence",
     "description",
+    "technical_detail",
     "malicious_text",
+    "hidden_text",
+    "evidence_json",
     "location",
+    "cve",
+    "mitre_technique",
+    "attack_objective",
     "error",
 ]
 
@@ -129,6 +144,13 @@ def detected_threats(findings: list[dict[str, Any]]) -> str:
     return ";".join(values)
 
 
+def _evidence_value(finding: dict[str, Any], key: str) -> str:
+    ev = finding.get("evidence")
+    if isinstance(ev, dict):
+        return text_from(ev.get(key))
+    return ""
+
+
 def row_for_finding(
     filename: str,
     scan_mode: str,
@@ -139,6 +161,8 @@ def row_for_finding(
     finding: dict[str, Any],
     error: str = "",
 ) -> dict[str, Any]:
+    evidence = finding.get("evidence") if isinstance(finding.get("evidence"), dict) else {}
+    evidence_json = json.dumps(evidence, ensure_ascii=False, default=str, sort_keys=True) if evidence else ""
     return {
         "Filename": filename,
         "scan_mode": scan_mode,
@@ -146,10 +170,21 @@ def row_for_finding(
         "risk_score": round(risk_score, 4),
         "finding_count": finding_count,
         "detected_threats": threats,
+        "threat_id": text_from(finding.get("threat_id") or finding.get("threat") or finding.get("id")),
+        "title": text_from(finding.get("title")),
         "severity": text_from(finding.get("severity")),
+        "verdict_class": text_from(finding.get("verdict_class")),
+        "module": text_from(finding.get("module")),
+        "confidence": text_from(finding.get("confidence")),
         "description": finding_description(finding),
-        "malicious_text": text_from(finding.get("evidence", {}).get("malicious_text") if isinstance(finding.get("evidence"), dict) else finding.get("malicious_text")),
+        "technical_detail": text_from(finding.get("technical_detail")),
+        "malicious_text": _evidence_value(finding, "malicious_text") or text_from(finding.get("malicious_text")),
+        "hidden_text": _evidence_value(finding, "hidden_text"),
+        "evidence_json": evidence_json,
         "location": text_from(finding.get("location")),
+        "cve": text_from(finding.get("cve")),
+        "mitre_technique": text_from(finding.get("mitre_technique")),
+        "attack_objective": text_from(finding.get("attack_objective")),
         "error": error,
     }
 
@@ -157,8 +192,16 @@ def row_for_finding(
 def json_finding(finding: dict[str, Any]) -> dict[str, Any]:
     payload = {
         "threat_id": text_from(finding.get("threat_id") or finding.get("threat") or finding.get("id")),
+        "title": text_from(finding.get("title")),
         "severity": text_from(finding.get("severity")),
+        "verdict_class": text_from(finding.get("verdict_class")),
+        "module": text_from(finding.get("module")),
+        "confidence": finding.get("confidence"),
         "description": finding_description(finding),
+        "technical_detail": text_from(finding.get("technical_detail")),
+        "cve": text_from(finding.get("cve")),
+        "mitre_technique": text_from(finding.get("mitre_technique")),
+        "attack_objective": text_from(finding.get("attack_objective")),
     }
     evidence = finding.get("evidence")
     if isinstance(evidence, dict):
@@ -280,6 +323,13 @@ def main() -> int:
     )
     parser.add_argument("--profile", default="strict", choices=sorted(VALID_PROFILES))
     parser.add_argument("--mode", default="standard", choices=SCAN_MODES)
+    parser.add_argument(
+        "--no-pii",
+        dest="enable_pii",
+        action="store_false",
+        help="Skip the T8 PII detector entirely (no phone/email/SSN/etc. findings). "
+        "Useful for resume corpora where PII is expected and not a threat.",
+    )
     args = parser.parse_args()
 
     if not args.input_dir.is_dir():
@@ -291,7 +341,7 @@ def main() -> int:
         raise SystemExit("doc-firewall is not installed. Run `pip install doc-firewall`.") from exc
 
     try:
-        config = build_scan_config(ScanConfig, args.profile, args.mode)
+        config = build_scan_config(ScanConfig, args.profile, args.mode, enable_pii=args.enable_pii)
     except TypeError as exc:
         raise SystemExit(
             f"Scan mode '{args.mode}' is not supported by this installed doc-firewall package. "
