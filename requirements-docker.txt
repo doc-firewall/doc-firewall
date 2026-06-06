@@ -202,9 +202,9 @@ dill==0.4.1 \
     --hash=sha256:1e1ce33e978ae97fcfcff5638477032b801c46c7c65cf717f95fbc2248f79a9d \
     --hash=sha256:423092df4182177d4d8ba8290c8a5b640c66ab35ec7da59ccfa00f6fa3eea5fa
     # via multiprocess
-docling==2.91.0 \
-    --hash=sha256:c37fa0957e63a784753a4d43fc1271caa869d883a8354d556ee6d52a3046929e \
-    --hash=sha256:db413c21b2fe5bec78c32b475346ef770ab40368a331150570371c3281c951a2
+docling==2.94.0 \
+    --hash=sha256:13b87660a5f7d96a85e863da631bbf83e6496bd74ef5e950ca780dacdbe82b48 \
+    --hash=sha256:e5f0c79091d4654f9b9a8b28dc064e421253295b3dbefd3424831c7ccc00a23a
     # via doc-firewall (pyproject.toml)
 docling-core[chunking]==2.74.1 \
     --hash=sha256:46bf298686f2c51ddd69b6935a27dff1cc80838f2f5f1a8823492d99cf1a357b \
