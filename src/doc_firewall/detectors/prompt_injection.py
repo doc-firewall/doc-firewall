@@ -323,6 +323,18 @@ class PromptInjectionDetector(Detector):
 
             matches.sort(key=lambda x: x["weight"], reverse=True)
 
+            # T4 nuance is recorded via evidence["subtype"] (taxonomy frozen at
+            # T1–T12). Flag data-exfiltration intent when the exfiltration
+            # pattern category fired.
+            evidence = {
+                "score": total_score,
+                "match_count": len(matches),
+                "top_matches": matches[:5],
+                "malicious_text": matches[0]["match"] if matches else clean_text[:250],
+            }
+            if any(m.get("category") == "exfiltration" for m in matches):
+                evidence["subtype"] = "data_exfiltration"
+
             findings.append(
                 Finding(
                     threat_id=ThreatID.T4_PROMPT_INJECTION,
@@ -331,12 +343,7 @@ class PromptInjectionDetector(Detector):
                     explain=(
                         f"Detected multiple indicators. Score {total_score:.1f} >= 2.0."
                     ),
-                    evidence={
-                        "score": total_score,
-                        "match_count": len(matches),
-                        "top_matches": matches[:5],
-                        "malicious_text": matches[0]["match"] if matches else clean_text[:250]
-                    },
+                    evidence=evidence,
                     confidence=confidence,
                     module="detectors.prompt_injection_v2",
                 )

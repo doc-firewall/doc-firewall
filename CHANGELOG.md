@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.7] - 2026-06-06
+
+### Added
+
+- **Resume-scanning example + recommended config.** New `examples/13_scan_resumes.py` (a resume-focused companion to `12_scan_folder.py`) scans a single resume or a folder recursively, loading its entire detection policy from YAML. Restricted to resume formats (`.pdf` / `.docx` / `.docm` / `.doc` / `.odt` / `.rtf`), prints per-file verdicts plus a summary, supports an optional `--json` report, and returns a non-zero exit code on any `BLOCK`/`ERROR` for CI gating.
+- **`examples/resume.yaml`** — recommended settings for screening attacker-controlled resumes: turns up the content-manipulation detectors that matter (T9 ATS / hidden text, T3 obfuscation, T4 prompt injection, T5 ranking, T10 indirect injection, OCR injection, T2 active content) and disables the T8 PII detector (name/email/phone/address are expected in a resume and only generate noise), while keeping secret scanning on.
+
 ## [0.4.6] - 2026-06-01
 
 ### Fixed
