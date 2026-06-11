@@ -1,0 +1,53 @@
+# H.8 (0.4.8) — Threat-code × file-format coverage matrix.
+#
+# Status values:
+#   tested-here   — exercised end-to-end by tests/test_coverage_matrix.py
+#   tested-in     — exercised by the named existing test file
+#   contract-only — detector fires but content extraction falls back to the
+#                   evidence contract (reason + debug_steps); known gap
+#   na            — combination not applicable for the format
+#
+# Rows: T1–T12 (frozen taxonomy). Columns sample the supported formats.
+T1_MALWARE:
+  all: {status: tested-in, ref: "yara/EICAR paths, tests/test_v1_features.py"}
+T2_ACTIVE_CONTENT:
+  pdf:  {status: tested-in, ref: tests/test_pdf_action_resolution.py}
+  csv:  {status: tested-in, ref: tests/test_phase_e.py}
+  odf:  {status: tested-in, ref: tests/test_phase_e.py}
+  docx: {status: tested-in, ref: tests/test_adversarial.py}
+  pptx: {status: tested-in, ref: tests/test_pptx_xlsx.py}
+  xlsx: {status: tested-in, ref: tests/test_pptx_xlsx.py}
+T3_OBFUSCATION:
+  docx: {status: tested-in, ref: "tests/test_adversarial.py (0.4.6 hidden-text evidence)"}
+  pptx: {status: tested-here, note: "0.4.8 parity — hidden run text extracted"}
+  odf:  {status: tested-here, note: "0.4.8 parity — styles.xml→content.xml join"}
+  xlsx: {status: contract-only,
+         note: "white-color styling detected; cell-text join through styles.xml
+                indices not implemented — finding carries reason + debug steps"}
+T4_PROMPT_INJECTION:
+  docx: {status: tested-here}
+  pptx: {status: tested-here}
+  xlsx: {status: tested-here}
+  odt:  {status: tested-here}
+  html: {status: tested-here}
+  rtf:  {status: tested-here}
+  csv:  {status: tested-here}
+  pdf:  {status: tested-in, ref: "tests/test_phase_e.py (annotations/AcroForm)"}
+T5_RANKING_MANIPULATION:
+  text-bearing: {status: tested-in, ref: tests/test_v1_features.py}
+T6_DOS:
+  zip-based: {status: tested-in, ref: "zip-bomb ratio checks, tests/test_pptx_xlsx.py"}
+  pdf:  {status: tested-in, ref: tests/test_v1_features.py}
+T7_EMBEDDED_PAYLOAD:
+  all: {status: tested-in, ref: tests/test_adversarial.py}
+T8_METADATA_INJECTION:
+  docx: {status: tested-in, ref: tests/test_metadata_evidence.py}
+  pdf:  {status: tested-in, ref: tests/test_benign_corpus.py}
+T9_ATS_MANIPULATION:
+  text-bearing: {status: tested-in, ref: tests/test_adversarial.py}
+T10_INDIRECT_INJECTION:
+  text-bearing: {status: tested-in, ref: tests/test_indirect_injection.py}
+T11_RAG_POISONING:
+  text-bearing: {status: tested-in, ref: tests/test_rag_poisoning.py}
+T12_SOCIAL_ENGINEERING:
+  text-bearing: {status: tested-in, ref: tests/test_social_engineering.py}

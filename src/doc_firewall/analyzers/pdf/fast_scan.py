@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 import re
 import math
 import zlib
@@ -7,6 +8,8 @@ from ...enums import ThreatID, Severity, VerdictClass
 from ...report import Finding
 from ...config import ScanConfig
 from ...logger import get_logger
+from .action_resolver import resolve_pdf_actions, summarize_actions
+from .uri_classify import classify_pdf_uris
 
 logger = get_logger()
 
@@ -173,34 +176,9 @@ SUSPICIOUS_TOKENS = [
     b"/JBIG2Decode",   # CVE-2021-30860 carrier (FORCEDENTRY/Pegasus)
 ]
 
-# URL schemes that should never appear in a benign PDF hyperlink. Mirrors
-# pdf/active_content.py — kept in sync. Plain http(s)/mailto/tel pass silently.
-_SUSPICIOUS_URI_SCHEMES_RE = re.compile(
-    rb"^(?:javascript|data|vbscript|file|jar):", re.IGNORECASE
-)
-_IP_LITERAL_HOST_RE = re.compile(
-    rb"^https?://(?:\d{1,3}\.){3}\d{1,3}", re.IGNORECASE
-)
-# Match a /URI ( ... ) entry. Cap inner capture so a malformed PDF can't
-# blow up the regex on a giant span.
-_URI_ENTRY_RE = re.compile(rb"/URI\s*\(([^)\\]{1,2000})\)")
-
-
-def _scan_suspicious_uris(data: bytes) -> list[dict]:
-    """Return a list of {target} for any /URI entries whose target uses a
-    suspicious scheme. Plain http(s)/mailto/tel hyperlinks return nothing."""
-    out: list[dict] = []
-    for m in _URI_ENTRY_RE.finditer(data):
-        target = m.group(1).strip()
-        if _SUSPICIOUS_URI_SCHEMES_RE.match(target) or _IP_LITERAL_HOST_RE.match(target):
-            try:
-                decoded = target.decode("latin-1", errors="replace")[:200]
-            except Exception:
-                decoded = "<unprintable>"
-            out.append({"target": decoded})
-            if len(out) >= 20:
-                break
-    return out
+# H.5 (0.4.8): /URI classification (suspicious schemes, remote/executable
+# file: targets, local export artifacts) lives in uri_classify.py — shared
+# with the deep scan by import, not by copy.
 
 # D.7: Tokens that warrant CRITICAL severity when found alongside an anomaly.
 _CVE_PDF_TOKENS = {
@@ -238,9 +216,56 @@ def fast_scan_pdf(file_path: str, config: ScanConfig) -> List[Finding]:
     with open(file_path, "rb") as f:
         data = f.read(limit_bytes)
 
+    # H.14 (0.4.8): the token scan only reads the first
+    # fast_pdf_token_scan_mb. Bytes past the cap are a blind spot — a payload
+    # positioned beyond it is never seen. Surface that partial coverage
+    # rather than implying a clean scan of the whole file.
+    try:
+        total_size = os.path.getsize(file_path)
+    except OSError:
+        total_size = len(data)
+    if total_size > limit_bytes:
+        findings.append(
+            Finding(
+                threat_id=ThreatID.T6_DOS,
+                severity=Severity.LOW,
+                title="PDF only partially scanned (size cap)",
+                explain=(
+                    f"Only the first {config.limits.fast_pdf_token_scan_mb} MB "
+                    f"of this {total_size / (1024 * 1024):.1f} MB PDF were "
+                    "fast-scanned for active-content tokens. Content past the "
+                    "cap was not inspected."
+                ),
+                evidence={
+                    "subtype": "partial_scan_size_cap",
+                    "scanned_bytes": len(data),
+                    "total_bytes": total_size,
+                    "evidence_unavailable_reason": (
+                        f"the file exceeds the {config.limits.fast_pdf_token_scan_mb} MB "
+                        "fast-scan byte cap; the unscanned tail could not be inspected"
+                    ),
+                    "debug_steps": [
+                        "Raise DOC_FIREWALL_LIMITS_FAST_PDF_TOKEN_SCAN_MB to cover the "
+                        "whole file, then re-scan.",
+                        "pdfid.py <file>  # full-file token census independent of the cap",
+                    ],
+                },
+                confidence=0.5,
+                module="fast_scan.pdf.partial",
+                verdict_class=VerdictClass.INFO,
+            )
+        )
+
     # 1. Token Scan (Active Content)
     # Valid PDF delimiters to ensure token is a real key
     delims_pattern = b"[\x00\t\n\f\r ()<>\\[\\]{}/%]"
+
+    # H.2 (0.4.8): resolve /OpenAction and /AA to the action they execute,
+    # so the finding can carry the target (script/URI/command) as evidence —
+    # and so a benign "open at page N" OpenAction stops scoring as HIGH.
+    resolved_actions: list[dict] = []
+    if b"/OpenAction" in data or b"/AA" in data:
+        resolved_actions = resolve_pdf_actions(data)
 
     for token in SUSPICIOUS_TOKENS:
         if token in data:
@@ -256,6 +281,47 @@ def fast_scan_pdf(file_path: str, config: ScanConfig) -> List[Finding]:
             ]:
                 sev = Severity.HIGH
 
+            evidence: dict = {"token": token.decode("ascii", errors="ignore")}
+            verdict_class = VerdictClass.REVIEW
+            explain = "Found suspicious token '{}' in raw file stream.".format(
+                token.decode("ascii", errors="ignore")
+            )
+            # H.13: the /Encrypt token marks an un-inspectable document — tag
+            # it with the same subtype + contract evidence as the dedicated
+            # encryption finding so the central on_unscannable_verdict policy
+            # governs both (and a block-upgrade still satisfies the contract).
+            if token == b"/Encrypt":
+                evidence["subtype"] = "encrypted_unscannable"
+                evidence["evidence_unavailable_reason"] = (
+                    "the PDF is encrypted (/Encrypt) — content streams cannot "
+                    "be decoded without the password/owner key"
+                )
+                evidence["debug_steps"] = [
+                    "qpdf --decrypt --password=<pw> in.pdf out.pdf  # then re-scan out.pdf",
+                    "pdfid.py in.pdf  # confirm /Encrypt and list object types present",
+                ]
+            if token in (b"/OpenAction", b"/AA") and resolved_actions:
+                prefix = "OpenAction" if token == b"/OpenAction" else "AA"
+                relevant = [
+                    a for a in resolved_actions
+                    if a.get("trigger", "").startswith(prefix)
+                ]
+                if relevant:
+                    evidence.update(summarize_actions(relevant))
+                    if evidence.get("all_benign"):
+                        sev = Severity.LOW
+                        verdict_class = VerdictClass.INFO
+                        explain = (
+                            f"'{evidence['token']}' resolves to internal page "
+                            "navigation only ('open at page N') — standard in "
+                            "exported PDFs, not active content."
+                        )
+                    elif evidence.get("malicious_text"):
+                        explain = (
+                            f"'{evidence['token']}' action resolved; target "
+                            "is in evidence (malicious_text)."
+                        )
+
             cve_meta = _CVE_PDF_TOKENS.get(token, (None, None))
             findings.append(
                 Finding(
@@ -268,22 +334,23 @@ def fast_scan_pdf(file_path: str, config: ScanConfig) -> List[Finding]:
                     title="Suspicious PDF Token found: {}".format(
                         token.decode("ascii", errors="ignore")
                     ),
-                    explain="Found suspicious token '{}' in raw file stream.".format(
-                        token.decode("ascii", errors="ignore")
-                    ),
-                    evidence={"token": token.decode("ascii", errors="ignore")},
+                    explain=explain,
+                    evidence=evidence,
                     confidence=0.65,
                     module="fast_scan.pdf.tokens",
                     cve=cve_meta[0],
                     mitre_technique=cve_meta[1],
+                    verdict_class=verdict_class,
                 )
             )
 
     # /URI is checked separately — only flag entries whose target uses a
-    # suspicious scheme (javascript:/data:/file:/vbscript:/jar:) or an
-    # IP-literal host. Plain http(s)/mailto/tel hyperlinks (LinkedIn, email,
-    # phone) are not flagged.
-    suspicious_uris = _scan_suspicious_uris(data)
+    # suspicious scheme (javascript:/data:/vbscript:/jar:), an IP-literal
+    # host, or a file:// link to a remote host / executable. Plain http(s)/
+    # mailto/tel hyperlinks (LinkedIn, email, phone) are not flagged, and
+    # local file:// document paths (Office→PDF export artifacts) are
+    # recorded as INFO by the deep scan instead of flagged here.
+    suspicious_uris, _local_artifacts = classify_pdf_uris(data)
     if suspicious_uris:
         findings.append(
             Finding(
@@ -291,9 +358,11 @@ def fast_scan_pdf(file_path: str, config: ScanConfig) -> List[Finding]:
                 severity=Severity.HIGH,
                 title="PDF contains hyperlink with suspicious URL scheme",
                 explain=(
-                    "/URI entries reference javascript:, data:, file:, "
-                    "vbscript:, jar:, or IP-literal targets. Plain http(s)/"
-                    "mailto/tel hyperlinks are not flagged."
+                    "/URI entries reference javascript:, data:, vbscript:, "
+                    "jar:, IP-literal targets, or file:// links to a remote "
+                    "host or an executable. Plain http(s)/mailto/tel "
+                    "hyperlinks and local file:// document paths are not "
+                    "flagged."
                 ),
                 evidence={
                     "suspicious_uris": suspicious_uris,
@@ -739,7 +808,20 @@ def fast_scan_pdf(file_path: str, config: ScanConfig) -> List[Finding]:
                     "password protection or DRM. Encrypted content cannot be "
                     "fully scanned; treat as unverified."
                 ),
-                evidence={"malicious_text": "/Encrypt indirect reference found"},
+                evidence={
+                    # H.13: this is a blind spot, not a detected payload —
+                    # honest evidence is "why we can't see" + how to inspect,
+                    # not a description masquerading as malicious_text.
+                    "subtype": "encrypted_unscannable",
+                    "evidence_unavailable_reason": (
+                        "the PDF is encrypted (/Encrypt) — its content streams "
+                        "cannot be decoded without the password/owner key"
+                    ),
+                    "debug_steps": [
+                        "qpdf --decrypt --password=<pw> in.pdf out.pdf  # then re-scan out.pdf",
+                        "pdfid.py in.pdf  # confirm /Encrypt and see what object types are present",
+                    ],
+                },
                 confidence=0.80,
                 module="fast_scan.pdf.encrypt",
             )

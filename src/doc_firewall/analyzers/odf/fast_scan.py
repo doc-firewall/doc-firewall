@@ -49,6 +49,48 @@ _HIDDEN_DISPLAY_RE = re.compile(rb'text:display\s*=\s*"none"')
 _WHITE_TEXT_RE = re.compile(rb'fo:color\s*=\s*"#[Ff][EeFf][EeFf][EeFf][EeFf][EeFf]"')
 _ZERO_FONT_RE = re.compile(rb'fo:font-size\s*=\s*"0(?:\.\d+)?(?:pt|px|cm|in)?"')
 
+# H.7 (0.4.8): join hidden styles to the text they hide.
+_STYLE_BLOCK_RE = re.compile(
+    rb'<style:style[^>]*style:name="([^"]{1,64})"[^>]*>.{0,2000}?</style:style>',
+    re.DOTALL,
+)
+_HIDDEN_PROP_RE = re.compile(
+    rb'text:display\s*=\s*"none"'
+    rb'|fo:color\s*=\s*"#[Ff][EeFf][EeFf][EeFf][EeFf][EeFf]"'
+    rb'|fo:font-size\s*=\s*"0(?:\.\d+)?(?:pt|px|cm|in)?"'
+)
+
+
+def _resolve_hidden_styled_text(zf: zipfile.ZipFile, styles: bytes) -> str | None:
+    """Return the content.xml text styled by a hidden style, if any.
+
+    The invisible-styling declaration lives in styles.xml; the text it hides
+    sits in content.xml, joined by ``style:name`` → ``text:style-name``."""
+    try:
+        hidden_names = [
+            m.group(1)
+            for m in _STYLE_BLOCK_RE.finditer(styles)
+            if _HIDDEN_PROP_RE.search(m.group(0))
+        ][:10]
+        if not hidden_names:
+            return None
+        with zf.open("content.xml") as f:
+            content = f.read(512 * 1024)
+        pieces: list[str] = []
+        for name in hidden_names:
+            for m in re.finditer(
+                rb'text:style-name="' + re.escape(name) + rb'"[^>]*>([^<]{1,300})<',
+                content,
+            ):
+                piece = m.group(1).decode("utf-8", errors="replace").strip()
+                if piece:
+                    pieces.append(piece)
+                if len(pieces) >= 5:
+                    break
+        return " … ".join(pieces) if pieces else None
+    except Exception:
+        return None
+
 
 def fast_scan_odf(file_path: str, config: ScanConfig) -> List[Finding]:
     findings: List[Finding] = []
@@ -186,6 +228,29 @@ def fast_scan_odf(file_path: str, config: ScanConfig) -> List[Finding]:
                     if _ZERO_FONT_RE.search(styles):
                         hits.append("zero-size font")
                     if hits:
+                        # H.7 (0.4.8): resolve which text the hidden styles
+                        # apply to — the styling lives in styles.xml but the
+                        # invisible content sits in content.xml, joined by
+                        # style name. Report the text, not the technique.
+                        hidden_text = _resolve_hidden_styled_text(zf, styles)
+                        evidence = {
+                            "subtype": "odf_hidden_styles",
+                            "techniques": hits,
+                        }
+                        if hidden_text:
+                            evidence["hidden_text"] = hidden_text[:250]
+                            evidence["malicious_text"] = hidden_text[:250]
+                        else:
+                            evidence["evidence_unavailable_reason"] = (
+                                "hidden styling found in styles.xml but no "
+                                "text in content.xml references those styles "
+                                "directly (the style may be applied "
+                                "indirectly via inheritance)"
+                            )
+                            evidence["debug_steps"] = [
+                                "unzip -p <file> styles.xml  # locate the hidden style names",
+                                "unzip -p <file> content.xml  # search for text:style-name= references",
+                            ]
                         findings.append(Finding(
                             threat_id=ThreatID.T3_OBFUSCATION,
                             severity=Severity.HIGH,
@@ -195,11 +260,7 @@ def fast_scan_odf(file_path: str, config: ScanConfig) -> List[Finding]:
                                 "styled to be invisible to readers but extracted "
                                 "by parsers and ATS systems."
                             ),
-                            evidence={
-                                "subtype": "odf_hidden_styles",
-                                "techniques": hits,
-                                "malicious_text": ", ".join(hits),
-                            },
+                            evidence=evidence,
                             confidence=0.85,
                             module="fast_scan.odf.hidden",
                         ))

@@ -220,17 +220,21 @@ _ENRICHMENTS: list[dict] = [
     {
         "match": _title_contains("PDF contains hyperlink with suspicious URL scheme"),
         "explain": (
-            "This PDF contains a hyperlink that points to a JavaScript, data, file, "
-            "or other non-browser-friendly URL scheme — the kind that real attackers "
-            "use to execute code or pull payloads when the link is clicked. Regular "
-            "https:// or mailto: links are NOT flagged here. This finding alone is "
-            "enough to block the file."
+            "This PDF contains a hyperlink that points to a JavaScript or data URL, "
+            "a remote file-share, or an executable — the kind of target real "
+            "attackers use to execute code or pull payloads when the link is "
+            "clicked. Regular https:// or mailto: links are NOT flagged, and "
+            "neither are leftover links to documents on the author's own machine. "
+            "This finding alone is enough to block the file."
         ),
         "technical_detail": (
-            "PDF /URI entries are matched against a deny-list of schemes: javascript:, "
-            "data:, file:, vbscript:, jar:, plus raw IP-literal http(s) hosts. Plain "
-            "http(s)/mailto/tel/sms URIs are explicitly excluded. This finding is "
-            "marked verdict_class=BLOCK — single occurrence forces verdict=BLOCK."
+            "PDF /URI entries are matched against a deny-list: javascript:, data:, "
+            "vbscript:, jar: schemes, raw IP-literal http(s) hosts, file:// URIs "
+            "with a remote host (UNC / NTLM-credential-leak vector), and file:// "
+            "URIs pointing at an executable. Plain http(s)/mailto/tel/sms URIs and "
+            "local file:// document paths (Office→PDF export artifacts, reported "
+            "separately as INFO) are explicitly excluded. This finding is marked "
+            "verdict_class=BLOCK — single occurrence forces verdict=BLOCK."
         ),
     },
 

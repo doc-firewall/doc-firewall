@@ -74,6 +74,12 @@ class ScanReport:
     # This allows developers to use DocFirewall as a single entry point for intake
     content: Optional[Dict[str, Any]] = None
 
+    # H.11 (0.4.8): coverage transparency — which optional detection
+    # capabilities (YARA/AV malware sigs, semantic/OCR/BERT injection) were
+    # active for this scan. Lets a caller see when a verdict was produced in
+    # reduced-coverage mode. Populated by Scanner; None for hand-built reports.
+    coverage: Optional[Dict[str, Any]] = None
+
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, ScanReport):
             return NotImplemented

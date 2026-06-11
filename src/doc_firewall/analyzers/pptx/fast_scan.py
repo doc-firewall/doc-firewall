@@ -35,27 +35,63 @@ _PPTX_OFFSLIDE_X_LIMIT = 9_144_000 * 2
 _PPTX_OFFSLIDE_Y_LIMIT = 6_858_000 * 2
 
 
-def _check_hidden_pptx(content: bytes, filename: str) -> list[tuple[str, str]]:
-    """Detect hidden-text techniques in a slide XML bytes blob."""
-    hits: list[tuple[str, str]] = []
+_PPTX_RUN_TEXT_RE = re.compile(rb"<a:t>([^<]{1,500})</a:t>")
+
+
+def _nearby_run_text(content: bytes, pos: int, lookahead: int = 2000) -> str | None:
+    """H.7 (0.4.8): extract the text of the run following a hidden-styling
+    match, so the finding can report WHAT the invisible text says (DOCX got
+    this in 0.4.6; this is the PPTX parity fix)."""
+    m = _PPTX_RUN_TEXT_RE.search(content, pos, min(len(content), pos + lookahead))
+    if m:
+        try:
+            return m.group(1).decode("utf-8", errors="replace").strip() or None
+        except Exception:
+            return None
+    return None
+
+
+def _check_hidden_pptx(content: bytes, filename: str) -> list[tuple[str, str, str | None]]:
+    """Detect hidden-text techniques in a slide XML bytes blob.
+
+    Returns (technique, detail, hidden_text) triples — hidden_text is the
+    content of the styled run when extractable, else None."""
+    hits: list[tuple[str, str, str | None]] = []
     m = _PPTX_WHITE_COLOR_RE.search(content)
     if m:
-        hits.append(("white_color", f"white text color: #{m.group(1).decode()}"))
+        hits.append((
+            "white_color",
+            f"white text color: #{m.group(1).decode()}",
+            _nearby_run_text(content, m.end()),
+        ))
 
     m = _PPTX_TINY_FONT_RE.search(content)
     if m:
         hundredths = int(m.group(1))
         if hundredths <= 200:
             pts = hundredths / 100
-            hits.append(("tiny_font", f"font size {pts}pt (≤2pt threshold)"))
+            hits.append((
+                "tiny_font",
+                f"font size {pts}pt (≤2pt threshold)",
+                _nearby_run_text(content, m.end()),
+            ))
 
-    if _PPTX_HIDDEN_SHAPE_RE.search(content):
-        hits.append(("hidden_shape", 'shape/element with hidden="1" found'))
+    m = _PPTX_HIDDEN_SHAPE_RE.search(content)
+    if m:
+        hits.append((
+            "hidden_shape",
+            'shape/element with hidden="1" found',
+            _nearby_run_text(content, m.end()),
+        ))
 
     for m in _PPTX_OFFSLIDE_RE.finditer(content):
         x, y = int(m.group(1)), int(m.group(2))
         if abs(x) > _PPTX_OFFSLIDE_X_LIMIT or abs(y) > _PPTX_OFFSLIDE_Y_LIMIT:
-            hits.append(("offslide", f"off-slide position: x={x}, y={y} EMU"))
+            hits.append((
+                "offslide",
+                f"off-slide position: x={x}, y={y} EMU",
+                _nearby_run_text(content, m.end()),
+            ))
             break
 
     return hits
@@ -367,7 +403,19 @@ def fast_scan_pptx(file_path: str, config: ScanConfig) -> List[Finding]:
                             )
 
                     # H1 parity: white text, tiny font, hidden shapes, off-slide
-                    for technique, detail in _check_hidden_pptx(content, z.filename):
+                    for technique, detail, hidden_text in _check_hidden_pptx(
+                        content, z.filename
+                    ):
+                        evidence = {
+                            "technique": technique,
+                            "detail": detail,
+                            "part": z.filename,
+                        }
+                        # H.7 (0.4.8): carry the actual invisible text so the
+                        # reviewer can see what a human reader wouldn't.
+                        if hidden_text:
+                            evidence["hidden_text"] = hidden_text[:250]
+                            evidence["malicious_text"] = hidden_text[:250]
                         findings.append(
                             Finding(
                                 threat_id=ThreatID.T3_OBFUSCATION,
@@ -378,11 +426,7 @@ def fast_scan_pptx(file_path: str, config: ScanConfig) -> List[Finding]:
                                     "Hidden text in presentations is a common "
                                     "vector for injecting adversarial content."
                                 ),
-                                evidence={
-                                    "technique": technique,
-                                    "detail": detail,
-                                    "part": z.filename,
-                                },
+                                evidence=evidence,
                                 confidence=0.90,
                                 module="fast_scan.pptx.hidden_text",
                             )

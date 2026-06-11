@@ -107,6 +107,15 @@ def print_result(result: dict[str, Any]) -> None:
         print(line)
         if f.get("explain"):
             print(f"        {f['explain']}")
+        # 0.4.8 evidence contract: show WHAT was found (the malicious text),
+        # or why it couldn't be extracted plus how to dig it out yourself.
+        ev = f.get("evidence") or {}
+        if ev.get("malicious_text"):
+            print(f"        evidence: {ev['malicious_text'][:200]!r}")
+        elif ev.get("evidence_unavailable_reason"):
+            print(f"        evidence unavailable: {ev['evidence_unavailable_reason']}")
+            for step in ev.get("debug_steps", [])[:3]:
+                print(f"        debug: {step}")
 
 
 def main() -> int:

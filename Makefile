@@ -41,3 +41,15 @@ generate-model-manifest:
 	paths = [p.strip() for p in "$(MODELS)".split(",") if p.strip()]
 	ModelIntegrityChecker.generate_manifest(paths, "$(OUTPUT)", overwrite=True)
 	EOF
+
+## H.9 (0.4.8): Release benchmark — adversarial recall, benign FP rate,
+## evidence-contract compliance, scan timing. Writes benchmarks/<version>.json.
+## Run before every release, then gate against the previous baseline:
+##   make benchmark
+##   python scripts/benchmark_gate.py benchmarks/<new>.json benchmarks/<prev>.json
+benchmark:
+	PYTHONPATH=src:tests python scripts/benchmark_release.py
+
+benchmark-gate:
+	@ls benchmarks/*.json | tail -2 | xargs -n2 sh -c 'python scripts/benchmark_gate.py "$$1" "$$0"' 2>/dev/null \
+	  || python scripts/benchmark_gate.py $$(ls benchmarks/*.json | tail -1)

@@ -1,0 +1,134 @@
+# The Evidence Contract
+
+*New in 0.4.8.*
+
+A scanner verdict you can't verify is a verdict you can't automate. Since
+0.4.8, doc-firewall enforces a hard contract on every finding that can
+drive a decision:
+
+> **Every finding with severity `HIGH`/`CRITICAL` or
+> `verdict_class == BLOCK` carries one of:**
+>
+> 1. **`evidence["malicious_text"]`** — the actual offending content: the
+>    injected prompt, the text hidden in a 0-size font, the resolved
+>    `/OpenAction` JavaScript body, the launch command, the suspicious URI.
+> 2. **`evidence["evidence_unavailable_reason"]`** — why the content could
+>    not be extracted (encrypted stream, unsupported filter, compressed
+>    object region), **plus `evidence["debug_steps"]`** — concrete commands
+>    you can run to dig the content out of the document yourself
+>    (`pdf-parser.py -o 12 -f file.pdf`, `olevba file.doc`,
+>    `unzip -p file.docx word/document.xml`, …).
+
+This means you can safely automate on it:
+
+```python
+report = scanner.scan("incoming.pdf")
+if report.verdict == Verdict.BLOCK:
+    for f in report.findings:
+        if f.verdict_class == VerdictClass.BLOCK:
+            print(f.title)
+            print("  evidence:", f.evidence.get("malicious_text")
+                  or f.evidence.get("evidence_unavailable_reason"))
+            for step in f.evidence.get("debug_steps", []):
+                print("  debug:", step)
+```
+
+## What 0.4.8 changed under the hood
+
+**PDF actions are resolved, not just counted.** Before 0.4.8 an
+`/OpenAction` token produced `{"token": "/OpenAction", "count": 2}` at
+HIGH severity — the reviewer couldn't see what the action did. The scanner
+now follows the object reference and classifies the target:
+
+| Resolved action | Result |
+|---|---|
+| `/S /JavaScript` | script body extracted into `malicious_text` |
+| `/S /URI` | target URL extracted; scheme-tiered |
+| `/S /Launch` | command line extracted; HIGH |
+| `/S /GoTo` / bare destination | **benign** — "open at page N" is standard in exported PDFs; reported as INFO, never flags the document |
+| `/S /Named` | viewer command extracted; `NextPage`-class actions are benign |
+| unresolvable (encrypted / unsupported filter) | `evidence_unavailable_reason` + `debug_steps` |
+
+`/AA` (additional actions) and `/Next` action chains get the same
+treatment.
+
+**Hidden text findings carry the hidden text.** DOCX gained this in 0.4.6;
+0.4.8 adds parity for PPTX (the run following the invisible styling) and
+ODF (the `styles.xml` hidden style is joined to the `content.xml` spans
+that use it). XLSX white-cell styling still reports `contract-only`
+evidence (the style→cell→sharedStrings join is not implemented); the
+finding explains that and tells you which part to dump.
+
+**Snippets are centered on the match.** Evidence used to be the first 250
+characters of the field — often containing none of the matched content.
+Every regex-based finding now centers `malicious_text` on the match and
+includes the exact `match` text separately.
+
+**Misleading labels were renamed.** "SQL Injection in Metadata"
+(HIGH, confidence 0.9) is now "SQL-like Syntax in Metadata" (MEDIUM, 0.6):
+it is a heuristic that needs either two distinct SQL tokens or statement
+punctuation to fire at all, and the evidence shows the actual SQL.
+
+**Incomplete scans are never silent.** If a scan stage exceeds its budget
+(10 minutes per stage by default, doubled in 0.4.8), the report gains a
+`scan_timeout` finding that escalates the verdict to at least FLAG —
+`on_timeout_verdict="block"` fails closed. The finding states explicitly
+that this is an operational signal, not a malice claim, and its
+`debug_steps` show how to re-run with a bigger budget.
+
+## Coverage transparency — know what's actually running
+
+
+Several of the strongest detectors are **opt-in** and depend on optional
+packages: YARA and an antivirus engine (T1 malware signatures), and
+sentence-transformers / BERT / OCR / perplexity (the ML layers of T4 prompt
+injection). With a default `pip install doc-firewall` and the default
+config they are **off**, so the scanner runs on baseline regex/structural
+checks only — and previously it did so *silently*.
+
+Now every report tells you what was active:
+
+```python
+report = scanner.scan("incoming.pdf")
+print(report.coverage["degraded"])          # True in reduced-coverage mode
+print(report.coverage["degraded_threats"])  # e.g. ["T1", "T4"]
+print(report.coverage["threat_status"])     # {"T1": "baseline-only", ...}
+```
+
+A Scanner built in reduced-coverage mode also logs one loud warning naming
+each inactive capability and exactly how to turn it on.
+
+To **fail closed** when promised detection is inactive:
+
+```python
+cfg = ScanConfig(profile="strict")
+cfg.require_full_coverage = True            # any T1/T4 with no active detector → >= FLAG
+# or require specific capabilities:
+cfg.required_capabilities = ["yara", "semantic_nn"]
+```
+
+A document scanned with a required capability missing can no longer return
+ALLOW — it carries a `reduced_coverage` finding and escalates to FLAG.
+
+Note: a format-*parsing* enabler (e.g. `olefile`, which lets the scanner
+read legacy `.doc`/`.xls`/`.ppt`) is **not** counted as malware
+*detection* — T1 still reports `baseline-only` unless YARA or an AV engine
+is active.
+
+## Content the scanner can't read
+
+*New in 0.4.8.* Encrypted PDFs (`/Encrypt`) and password-protected Office
+files are a blind spot — the scanner cannot decrypt them. `on_unscannable_verdict`
+chooses the policy:
+
+| value | behaviour |
+|---|---|
+| `warn` (default) | FLAG, with a `debug_steps` recipe (`qpdf --decrypt`, `msoffcrypto-tool`) |
+| `block` | fail closed — un-inspectable content is BLOCKed |
+| `allow` | recorded as INFO only |
+
+## Guarantee
+
+`make benchmark` measures contract compliance across the adversarial
+corpus on every release; `scripts/benchmark_gate.py` fails the release if
+compliance is below 100 %.

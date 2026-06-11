@@ -6,6 +6,8 @@ from ...report import Finding
 from ...enums import ThreatID, Severity, VerdictClass
 from ...config import ScanConfig
 from ..base import ParsedDocument
+from .action_resolver import resolve_pdf_actions, summarize_actions
+from .uri_classify import classify_pdf_uris
 
 # Tokens that always indicate active behaviour in a PDF. /URI and /AcroForm
 # are intentionally NOT in this list — a /URI is just a hyperlink (resumes
@@ -22,34 +24,9 @@ SUSPICIOUS_TOKENS = [
     b"/Filespec",
 ]
 
-# URL schemes that should never appear in a benign PDF hyperlink.
-_SUSPICIOUS_URI_SCHEMES = re.compile(
-    rb"^(?:javascript|data|vbscript|file|jar):", re.IGNORECASE
-)
-# IP-literal hosts in http(s) URLs — also unusual for benign documents.
-_IP_LITERAL_HOST = re.compile(
-    rb"^https?://(?:\d{1,3}\.){3}\d{1,3}", re.IGNORECASE
-)
-# Match a /URI ( ... ) entry. Cap inner capture so a malformed PDF can't
-# blow up the regex on a giant span.
-_URI_ENTRY_RE = re.compile(rb"/URI\s*\(([^)\\]{1,2000})\)")
-
-
-def _scan_suspicious_uris(blob: bytes) -> List[Dict[str, Any]]:
-    """Return a list of {scheme, target} for any /URI entries whose target
-    looks malicious. Plain http(s)/mailto/tel hyperlinks return nothing."""
-    out: List[Dict[str, Any]] = []
-    for m in _URI_ENTRY_RE.finditer(blob):
-        target = m.group(1).strip()
-        if _SUSPICIOUS_URI_SCHEMES.match(target) or _IP_LITERAL_HOST.match(target):
-            try:
-                decoded = target.decode("latin-1", errors="replace")[:200]
-            except Exception:
-                decoded = "<unprintable>"
-            out.append({"target": decoded})
-            if len(out) >= 20:
-                break  # cap evidence size
-    return out
+# H.5 (0.4.8): /URI classification (suspicious schemes, remote/executable
+# file: targets, local export artifacts) lives in uri_classify.py — shared
+# with the fast scan by import, not by copy.
 
 
 def detect_pdf_active_content(doc: ParsedDocument, config: ScanConfig) -> List[Finding]:
@@ -82,21 +59,53 @@ def detect_pdf_active_content(doc: ParsedDocument, config: ScanConfig) -> List[F
             if any(h["token"] in high_risk for h in hits)
             else Severity.MEDIUM
         )
+        evidence: Dict[str, Any] = {"hits": hits, "bytes_scanned": max_read}
+        verdict_class = VerdictClass.REVIEW
+        explain = (
+            "Detected PDF keys associated with actions, scripts, "
+            "embedded files, or external links."
+        )
+
+        # H.2 (0.4.8): resolve what /OpenAction and /AA actually execute, so
+        # the finding reports the action target (script body, URI, launch
+        # command) instead of just the token name — and so that the single
+        # most common benign case (/OpenAction → /GoTo "open at page N",
+        # present in most exported PDFs that set an opening view) stops
+        # raising MEDIUM/HIGH on zero evidence.
+        hit_tokens = {h["token"] for h in hits}
+        if hit_tokens & {"/OpenAction", "/AA"}:
+            actions = resolve_pdf_actions(blob)
+            if actions:
+                evidence.update(summarize_actions(actions))
+                only_triggers = hit_tokens <= {"/OpenAction", "/AA"}
+                if evidence.get("all_benign") and only_triggers:
+                    sev = Severity.LOW
+                    verdict_class = VerdictClass.INFO
+                    explain = (
+                        "The document's open-action resolves to internal page "
+                        "navigation only ('open at page N') — a standard "
+                        "feature of exported PDFs, not active content."
+                    )
+                elif evidence.get("malicious_text"):
+                    explain = (
+                        "Detected PDF action keys; the action target was "
+                        "resolved and is included in the evidence "
+                        "(malicious_text)."
+                    )
+
         findings.append(
             Finding(
                 threat_id=ThreatID.T2_ACTIVE_CONTENT,
                 severity=sev,
                 title="PDF contains active-content indicators",
-                explain=(
-                    "Detected PDF keys associated with actions, scripts, "
-                    "embedded files, or external links."
-                ),
-                evidence={"hits": hits, "bytes_scanned": max_read},
+                explain=explain,
+                evidence=evidence,
                 module="pdf.active_content",
+                verdict_class=verdict_class,
             )
         )
 
-    suspicious_uris = _scan_suspicious_uris(blob)
+    suspicious_uris, local_artifacts = classify_pdf_uris(blob)
     if suspicious_uris:
         findings.append(
             Finding(
@@ -104,9 +113,11 @@ def detect_pdf_active_content(doc: ParsedDocument, config: ScanConfig) -> List[F
                 severity=Severity.HIGH,
                 title="PDF contains hyperlink with suspicious URL scheme",
                 explain=(
-                    "/URI entries reference javascript:, data:, file:, "
-                    "vbscript:, jar:, or IP-literal targets. Plain http(s)/"
-                    "mailto/tel hyperlinks are not flagged."
+                    "/URI entries reference javascript:, data:, vbscript:, "
+                    "jar:, IP-literal targets, or file:// links to a remote "
+                    "host or an executable. Plain http(s)/mailto/tel "
+                    "hyperlinks and local file:// document paths are not "
+                    "flagged."
                 ),
                 evidence={
                     "suspicious_uris": suspicious_uris,
@@ -114,10 +125,34 @@ def detect_pdf_active_content(doc: ParsedDocument, config: ScanConfig) -> List[F
                 },
                 module="pdf.active_content",
                 confidence=0.9,
-                # javascript:/data:/file:/vbscript:/jar:/IP-literal hyperlinks
-                # have no legitimate use case — definitive code-execution or
-                # data-exfil vector. BLOCK.
+                # javascript:/data:/vbscript:/jar:/IP-literal hyperlinks and
+                # remote-host/executable file:// targets have no legitimate
+                # use case — definitive code-execution or data-exfil vector.
                 verdict_class=VerdictClass.BLOCK,
+            )
+        )
+    if local_artifacts:
+        # H.5 (0.4.8): Office→PDF export on Windows bakes the author's
+        # internal file:// links into the PDF link table. Leftover artifact,
+        # not an attack vector — record for audit, never affect the verdict.
+        findings.append(
+            Finding(
+                threat_id=ThreatID.T2_ACTIVE_CONTENT,
+                severity=Severity.LOW,
+                title="PDF contains local file-path links (export artifact)",
+                explain=(
+                    "Hyperlinks point at local file paths from the document "
+                    "author's machine — a common leftover when a Word/Office "
+                    "document with internal links is exported to PDF. They "
+                    "cannot execute anything and do not affect the verdict."
+                ),
+                evidence={
+                    "local_file_links": local_artifacts,
+                    "malicious_text": local_artifacts[0]["target"],
+                },
+                module="pdf.active_content",
+                confidence=0.9,
+                verdict_class=VerdictClass.INFO,
             )
         )
     return findings

@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.8] - 2026-06-10
+
+### Added
+
+- **Evidence contract.** Every HIGH/CRITICAL/BLOCK finding now carries either `evidence["malicious_text"]` (the actual offending content) or `evidence["evidence_unavailable_reason"]` + `evidence["debug_steps"]` (why it couldn't be extracted, and the commands to dig it out). Enforced and gated by a benchmark that fails the release below 100 % compliance.
+- **Coverage transparency.** Every report carries `report.coverage` showing which optional detectors (YARA/AV for T1; semantic-NN/BERT/OCR for T4) are actually active; a degraded scanner logs a loud warning. `require_full_coverage` / `required_capabilities` fail closed when a promised capability is missing.
+
+### Changed
+
+- **PDF actions are resolved, not just counted.** `/OpenAction` and `/AA` are followed through the object graph (including FlateDecode and `/ObjStm` compressed streams) and the target — JavaScript body, `/Launch` command, URI — is extracted into `malicious_text`. A benign "open at page N" action is INFO and no longer flags the document.
+- **Fewer false positives.** T12 social-engineering no longer fires on executive/résumé language (tighter window, sentence-scoped, narrative-aware); `file://` links baked in by Office→PDF export are INFO, while remote/executable `file://` and UNC still BLOCK; "SQL Injection in Metadata" is now the more honest MEDIUM "SQL-like Syntax in Metadata".
+- **Incomplete and un-inspectable scans never pass silently.** Stage timeouts (`on_timeout_verdict`) and encrypted/password-protected content (`on_unscannable_verdict`) escalate to FLAG by default and can fail closed (`block`).
+
+### Fixed
+
+- **Unicode-normalizer injection evasions** (homoglyphs produced by NFKC; CR-separated obfuscation) — found by re-enabling the property-based tests, which previously failed to collect.
+
+### Security
+
+- **PYSEC-2026-196:** `pip` raised to ≥ 26.1.2.
+
 ## [0.4.7] - 2026-06-06
 
 ### Added

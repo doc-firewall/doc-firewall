@@ -186,6 +186,13 @@ def normalize_for_matching(text: str) -> str:
     # superscript/subscript digits and ligatures to plain ASCII).
     cleaned = unicodedata.normalize("NFKC", cleaned)
 
+    # Step 3a' — H.10 (0.4.8): NFKC can *produce* homoglyphs the step-2 fold
+    # already ran past — e.g. MICRO SIGN U+00B5 NFKC-folds to GREEK MU
+    # U+03BC, which the table maps to ASCII 'u'. Without this second pass,
+    # "µser" normalized to "μser" instead of "user" (found by the
+    # property-based idempotency test). Re-apply the fold post-NFKC.
+    cleaned = cleaned.translate(_HOMOGLYPH_TABLE)
+
     # Step 3b — F.3a: collapse single-char-separated obfuscation
     # ("i-g-n-o-r-e" → "ignore") for hyphen/dot/underscore/middle-dot/bullet.
     cleaned = _SEP_SINGLE_COLLAPSE_RE.sub(
@@ -198,6 +205,14 @@ def normalize_for_matching(text: str) -> str:
     # collapse so we don't accidentally re-insert spaces into "ignore".
     cleaned = _SEP_INTERLETTER_RE.sub(" ", cleaned)
 
+    # Step 3d-pre — H.10 (0.4.8): normalize whitespace BEFORE the
+    # single-char-space collapse. Previously "i\rg\rn\ro\rr\re" survived
+    # pass 1 (collapse only knew plain spaces) but collapsed on pass 2
+    # after \r→space — non-idempotent, i.e. a one-pass evasion (found by
+    # the property-based idempotency test).
+    cleaned = re.sub(r"\s", " ", cleaned)
+    cleaned = re.sub(r" {2,}", " ", cleaned)
+
     # Step 3d — F.5: collapse "i g n o r e" style single-char-with-space
     # obfuscation. Runs of 3+ single chars separated by exactly one space
     # collapse to the contiguous word. This fires after ZW→space contextual
@@ -208,7 +223,6 @@ def normalize_for_matching(text: str) -> str:
     )
 
     # Step 4 — collapse whitespace
-    cleaned = re.sub(r"[\n\r\t]", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
 
     # Step 5 — lowercase

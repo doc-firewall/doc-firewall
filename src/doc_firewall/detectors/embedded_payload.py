@@ -196,7 +196,11 @@ class EmbeddedPayloadDetector(Detector):
         ]
 
         for pat, title in suspicious_patterns:
-            if re.search(pat, text, re.IGNORECASE):
+            m = re.search(pat, text, re.IGNORECASE)
+            if m:
+                # H.3 (0.4.8): center the evidence on the match — the head of
+                # the document said nothing about *what* command was found.
+                snippet = text[max(0, m.start() - 60): m.end() + 190].strip()
                 findings.append(
                     Finding(
                         threat_id=ThreatID.T7_EMBEDDED_PAYLOAD,
@@ -206,7 +210,7 @@ class EmbeddedPayloadDetector(Detector):
                             f"Detected pattern associated with script "
                             f"execution or payload delivery: {title}."
                         ),
-                        evidence={"pattern": pat, "malicious_text": text[:250]},
+                        evidence={"pattern": pat, "match": m.group(0)[:80], "malicious_text": snippet[:250]},
                         module=self.name,
                         confidence=0.95,
                         # eval(atob(...)), powershell -enc, cmd.exe /c have
