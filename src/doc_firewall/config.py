@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sys
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -53,21 +53,23 @@ class Limits(BaseSettings):
     # Fast scan limits
     fast_pdf_token_scan_mb: int = 2
 
-    # 5-minute per-stage timeouts. Real resumes / contracts / large PDFs in
-    # production routinely take 30–90 s when the strict profile enables BERT
-    # + sentence-transformers + YARA; the old 5–15 s budgets caused
-    # operational T6_DOS findings on benign documents. Genuine bombs are
-    # still caught by the dedicated DoS detectors with concrete evidence.
-    fast_scan_timeout_ms: int = 300000
-    parse_timeout_ms: int = 300000
-    format_checks_timeout_ms: int = 300000
-    detectors_timeout_ms: int = 300000
-    antivirus_timeout_ms: int = 300000
+    # 10-minute per-stage timeouts (H.6, 0.4.8 — doubled from 5). Real
+    # resumes / contracts / large PDFs in production routinely take 30–90 s
+    # when the strict profile enables BERT + sentence-transformers + YARA;
+    # short budgets caused operational T6_DOS findings on benign documents.
+    # Genuine bombs are still caught by the dedicated DoS detectors with
+    # concrete evidence. A stage that *still* times out leaves the scan
+    # incomplete — the verdict is escalated per `on_timeout_verdict`.
+    fast_scan_timeout_ms: int = 600000
+    parse_timeout_ms: int = 600000
+    format_checks_timeout_ms: int = 600000
+    detectors_timeout_ms: int = 600000
+    antivirus_timeout_ms: int = 600000
     # Hard process-level kill for Docling PDF conversion — must be shorter
     # than parse_timeout_ms so the thread can clean up before asyncio cancels
     # it. Kept ~10% below parse_timeout_ms.
     docling_subprocess_timeout_s: int = Field(
-        270, description="Seconds before the Docling subprocess is hard-killed"
+        540, description="Seconds before the Docling subprocess is hard-killed"
     )
     # Default Docling device is platform-aware (see _default_docling_device):
     # macOS → "cpu" to avoid the MPS float64 crash; everywhere else → "auto"
@@ -153,6 +155,60 @@ class ScanConfig(BaseSettings):
         ),
     )
     profile: str = Field("balanced", description="Threshold profile: lenient | balanced | strict")
+
+    # H.6 (0.4.8): a stage timeout means the scan is incomplete — the
+    # document was never fully checked, so it must not silently ALLOW.
+    # "warn" (default) escalates the verdict to at least FLAG; "block"
+    # fails closed for pipelines that must not pass unscanned content.
+    on_timeout_verdict: str = Field(
+        "warn",
+        description=(
+            "Verdict escalation when a scan stage times out: warn → FLAG, "
+            "block → BLOCK. The finding explains the scan is incomplete; "
+            "it does not claim the document is malicious."
+        ),
+    )
+
+    # H.13 (0.4.8): policy for content the scanner cannot inspect at all —
+    # encrypted PDFs (/Encrypt), password-protected Office (CFB-wrapped
+    # OOXML), encrypted archive members. "warn" (default) → FLAG so a
+    # reviewer sees the blind spot; "block" → fail closed for pipelines that
+    # must not pass un-inspectable content; "allow" → record as INFO only.
+    on_unscannable_verdict: str = Field(
+        "warn",
+        description=(
+            "Verdict for content the scanner cannot decrypt/inspect "
+            "(encrypted PDF/Office/archive): warn → FLAG, block → BLOCK, "
+            "allow → INFO. Default warn surfaces the blind spot without "
+            "blocking."
+        ),
+    )
+
+    # H.11 (0.4.8): coverage transparency. When True, a scan whose
+    # ML-dependent threats (T1/T4) have no active detection capability
+    # (missing extras / disabled flags) is escalated to at least FLAG —
+    # the scanner refuses to ALLOW on coverage it cannot actually provide.
+    require_full_coverage: bool = Field(
+        False,
+        description=(
+            "Fail closed (verdict >= FLAG) when an ML-dependent threat "
+            "(T1 malware signatures, T4 semantic/OCR/BERT injection) has no "
+            "active capability — i.e. the relevant extras/flags are off. "
+            "Off by default to preserve the lightweight regex-only mode, but "
+            "recommended for security-critical intake pipelines."
+        ),
+    )
+    # H.11 (0.4.8): explicit list of capability keys (see capabilities.py:
+    # yara, antivirus, semantic_nn, bert, ocr, qr, perplexity, ole, ...)
+    # that MUST be active; a scan missing any of them is escalated even when
+    # require_full_coverage is False. Empty = no explicit requirement.
+    required_capabilities: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Capability keys that must be active for a scan to be trusted. "
+            "A missing capability escalates the verdict to >= FLAG."
+        ),
+    )
 
     audit_log_path: Optional[str] = Field(
         None,

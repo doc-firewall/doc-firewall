@@ -218,3 +218,60 @@ class TestT12DoesNotFire:
             "purposes. Please consult legal counsel regarding compliance requirements."
         )
         assert not _run(text), f"Unexpected FP on legal notice: {_run(text)}"
+
+
+# ── H.4 (0.4.8): executive-language FP regression ─────────────────────────────
+
+@pytest.mark.benign
+class TestExecutiveLanguageFP:
+    """Reported 0.4.7 FP class: authority titles + action verbs co-located
+    across several sentences of normal resume/business prose."""
+
+    def test_reported_resume_fp_clean(self):
+        # The verbatim FP from the field report: past-tense narrative with
+        # executive titles must not pair with action verbs elsewhere.
+        text = (
+            "Partnered with Engineering, Legal, and Finance executives to "
+            "manage demands across the portfolio. Built quarterly forecasts "
+            "and presented them to the CFO. Streamlined the budget review "
+            "process, cutting cycle time by 30%. Mentored two analysts and "
+            "ran the team's hiring loop. In prior roles, worked closely with "
+            "the IT department on tooling migrations and helped the payroll "
+            "team verify your account reconciliations were audit-ready."
+        )
+        findings = _run(text)
+        assert not findings, f"Unexpected T12 FP on executive resume language: {findings}"
+
+    def test_distant_signals_across_sentences_clean(self):
+        # Authority and action 300+ chars apart in unrelated sentences.
+        filler = (
+            "The committee reviewed the annual report in detail. "
+            "Spending was in line with the approved plan. "
+            "Headcount grew by six across two quarters. "
+            "Vendor consolidation reduced contract overhead. "
+        )
+        text = (
+            "The CFO presented the results at the town hall. " + filler +
+            "To see the dashboard, click the link on the intranet home page."
+        )
+        findings = _run(text)
+        assert not findings, f"Unexpected T12 FP on distant signals: {findings}"
+
+    def test_past_tense_narrative_with_action_verbs_clean(self):
+        text = (
+            "Managed demands from the legal team and coordinated wire "
+            "transfer approvals for vendor payments as part of the treasury "
+            "operations role."
+        )
+        findings = _run(text)
+        assert not findings, f"Unexpected T12 FP on past-tense narrative: {findings}"
+
+    def test_real_lure_still_fires_same_sentence(self):
+        # Recall guard: a genuine directive lure must keep firing.
+        text = (
+            "This is the IT department — your mailbox will be deactivated "
+            "within 24 hours unless you verify your account now."
+        )
+        findings = _run(text)
+        assert findings
+        assert findings[0].threat_id == ThreatID.T12_SOCIAL_ENGINEERING

@@ -1,7 +1,9 @@
 """C.3 — T12: Social Engineering detector.
 
 Tri-signal co-occurrence model — a finding requires at least two of three
-signals present within a 600-character window:
+signals present within a 250-character window, in the same or adjacent
+sentence, with the action demand aimed at the reader (first-person
+past-tense narrative — resume bullets, executive bios — is suppressed):
 
   Signal A  Urgency / scarcity cues  ("immediately", "within 24 hours", "urgent")
   Signal B  Authority / identity claims  ("IT department", "CEO", "legal team")
@@ -23,8 +25,46 @@ from ..config import ScanConfig
 from ..report import Finding
 from ..enums import ThreatID, Severity
 
-_WINDOW = 600
+# H.4 (0.4.8): 600 → 250. At 600 chars the window spanned several sentences
+# of normal business prose — a reported FP paired "Engineering, Legal, and
+# Finance executives" with an action verb 401 characters away in an
+# unrelated resume bullet. Genuine lures put the pressure and the ask in
+# the same breath.
+_WINDOW = 250
 _MITRE = "T1566"
+
+# Sentence boundaries for the same-or-adjacent-sentence constraint. Plain
+# [.!?]+space only — newlines are NOT boundaries, because PDF text
+# extraction inserts hard line breaks mid-sentence.
+_SENT_BOUNDARY_RE = re.compile(r"[.!?]\s")
+
+# First-person / past-tense narrative context (resume bullets, bios,
+# performance reviews). An action-demand match inside such a clause is
+# someone *describing* work, not a directive at the reader.
+_NARRATIVE_PREFIX_RE = re.compile(
+    r"\b(?:partnered|managed|led|collaborated|coordinated|oversaw|delivered|"
+    r"drove|supported|handled|negotiated|liaised|spearheaded|directed|"
+    r"orchestrated|facilitated|implemented|executed|administered|"
+    r"helped|worked|built|created|developed|designed|established|launched|"
+    r"founded|improved|increased|reduced|streamlined|mentored|trained|"
+    r"advised|consulted|served|assisted|ensured|achieved|conducted|"
+    r"performed|prepared|produced|maintained|organized|organised)\b[^.!?]*$"
+    r"|\b(?:i|we)\s+(?:also\s+|then\s+)?[a-z]{3,}ed\b[^.!?]*$",
+    re.IGNORECASE,
+)
+
+
+def _crosses_many_sentences(text: str, p: int, q: int) -> bool:
+    """True when more than one sentence boundary separates the positions."""
+    lo, hi = min(p, q), max(p, q)
+    return len(_SENT_BOUNDARY_RE.findall(text[lo:hi])) > 1
+
+
+def _in_narrative_context(text: str, pos: int) -> bool:
+    """True when the match at ``pos`` sits in first-person past-tense
+    narrative rather than an imperative aimed at the reader."""
+    prefix = text[max(0, pos - 120): pos]
+    return bool(_NARRATIVE_PREFIX_RE.search(prefix))
 
 # ── Signal A: Urgency / scarcity ──────────────────────────────────────────────
 
@@ -59,7 +99,11 @@ _AUTHORITY_RE = re.compile(
 
 _ACTION_RE = re.compile(
     r'\b(?:click\s+(?:the\s+|this\s+)?(?:link|here|button|attachment|below)|'
-    r'open\s+(?:the\s+)?attachment|download\s+(?:the\s+)?(?:file|attachment|update)|'
+    r'open\s+(?:the\s+)?attachment|'
+    # H.4 (0.4.8) recall: "download and install <tool>" is the tech-support
+    # scam phrasing; the old pattern only knew file/attachment/update.
+    r'download\s+(?:the\s+|and\s+install\s+(?:a\s+|the\s+)?)?'
+    r'(?:file|attachment|update|software|scanner|tool|patch)|'
     r'wire\s+transfer|transfer\s+(?:the\s+)?(?:funds?|money|amount)|'
     r'provide\s+(?:your\s+)?(?:password|credentials?|login|username|pin|'
     r'social\s+security|ssn|bank\s+(?:account|details?|information)|'
@@ -72,10 +116,13 @@ _ACTION_RE = re.compile(
     # utility bills) routinely contain "call us at 800-XXX-XXXX" as benign
     # contact info, not as an action demand. The phishing pattern is "call
     # us NOW" / "call us IMMEDIATELY" — keep those.
-    r'call\s+us\s+(?:now|immediately|right\s+away)|'
+    r'call\s+(?:us\s+)?(?:now|immediately|right\s+away)|'
     r'reply\s+with\s+(?:your\s+)?(?:password|code|pin|ssn|account)|'
-    r'verify\s+(?:your\s+)?(?:account|identity|information|details?)|'
-    r'confirm\s+(?:your\s+)?(?:account|identity|details?|password)|'
+    # H.4 (0.4.8) recall: credential-verification lures say "verify your
+    # credentials/login/password", not just account/identity.
+    r'verify\s+(?:your\s+)?(?:account|identity|information|details?|'
+    r'credentials?|login|password)|'
+    r'confirm\s+(?:your\s+)?(?:account|identity|details?|password|credentials?)|'
     r'install\s+(?:this\s+)?(?:software|app|update|tool|remote\s+access)|'
     r'grant\s+(?:remote\s+)?(?:access|permission|control))\b',
     re.IGNORECASE,
@@ -332,17 +379,13 @@ class SocialEngineeringDetector(Detector):
         # ── Tri-signal co-occurrence (any two of A / B / C within window) ────
         a_positions = _find_signal_positions(_URGENCY_RE, text)
         b_positions = _find_signal_positions(_AUTHORITY_RE, text)
-        c_positions = _find_signal_positions(_ACTION_RE, text)
-
-        def _closest_pair(pos_list_1: list[int], pos_list_2: list[int]) -> int | None:
-            """Return the minimum distance between any pair across two position lists."""
-            best: int | None = None
-            for p in pos_list_1:
-                for q in pos_list_2:
-                    dist = abs(p - q)
-                    if best is None or dist < best:
-                        best = dist
-            return best
+        # H.4 (0.4.8): an action verb inside first-person past-tense
+        # narrative ("Partnered with … to manage …") is description, not a
+        # demand — drop it before pairing.
+        c_positions = [
+            p for p in _find_signal_positions(_ACTION_RE, text)
+            if not _in_narrative_context(text, p)
+        ]
 
         # Check each signal-pair combination.
         #
@@ -361,13 +404,20 @@ class SocialEngineeringDetector(Detector):
         for label_suffix, pos1, pos2, sig1_name, sig2_name in pairs:
             if not pos1 or not pos2:
                 continue
-            dist = _closest_pair(pos1, pos2)
-            if dist is not None and dist <= _WINDOW:
-                # Build evidence: find the closest pair's positions
-                best_p, best_q = min(
-                    ((p, q) for p in pos1 for q in pos2),
-                    key=lambda pq: abs(pq[0] - pq[1]),
-                )
+            # H.4 (0.4.8): a valid pair must sit within the window AND in the
+            # same or an adjacent sentence — flat character distance across
+            # several sentences of business prose is how the executive-
+            # language FP class slipped through.
+            valid_pairs = [
+                (p, q)
+                for p in pos1
+                for q in pos2
+                if abs(p - q) <= _WINDOW
+                and not _crosses_many_sentences(text, p, q)
+            ]
+            if valid_pairs:
+                best_p, best_q = min(valid_pairs, key=lambda pq: abs(pq[0] - pq[1]))
+                dist = abs(best_p - best_q)
                 win_start = max(0, min(best_p, best_q) - 50)
                 win_end = min(len(text), max(best_p, best_q) + 300)
                 snippet = text[win_start:win_end].strip()

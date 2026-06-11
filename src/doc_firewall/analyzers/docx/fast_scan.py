@@ -139,7 +139,19 @@ def fast_scan_docx(file_path: str, config: ScanConfig) -> List[Finding]:
                         "indicating password protection. Content cannot be scanned; "
                         "treat as unverified."
                     ),
-                    evidence={"malicious_text": "OLE2/CFB magic bytes — file is encrypted"},
+                    evidence={
+                        # H.13: blind spot, not a detected payload.
+                        "subtype": "encrypted_unscannable",
+                        "evidence_unavailable_reason": (
+                            "the document is wrapped in an encrypted OLE2/CFB "
+                            "container (password-protected) — the inner OOXML "
+                            "parts cannot be read without the password"
+                        ),
+                        "debug_steps": [
+                            "msoffcrypto-tool in.docx out.docx -p <pw>  # then re-scan out.docx",
+                            "Confirm the CFB wrapper: first 8 bytes == D0 CF 11 E0 A1 B1 1A E1",
+                        ],
+                    },
                     confidence=0.90,
                     module="fast_scan.docx.encrypt",
                 )

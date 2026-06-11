@@ -132,6 +132,7 @@ nav:
     - Examples: getting-started/examples.md
   - Core Concepts:
     - Architecture: concepts/architecture.md
+    - Evidence Contract: concepts/evidence.md
     - Threat Model: concepts/threats.md
     - Risk Scoring: concepts/risk-scoring.md
     - Policies: concepts/policies.md

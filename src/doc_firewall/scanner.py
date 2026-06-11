@@ -12,7 +12,9 @@ from .enums import ThreatID, Severity, Verdict, VerdictClass
 from .policy import Policy, PolicyEngine
 from .report import ScanReport, Finding
 from .risk_model import RiskModel
+from .capabilities import build_coverage_report
 from .detectors.explanations import enrich_findings
+from .detectors.evidence_contract import apply_evidence_contract
 from .analyzers.pdf.fast_scan import fast_scan_pdf
 from .analyzers.docx.fast_scan import fast_scan_docx
 from .analyzers.pptx.fast_scan import fast_scan_pptx
@@ -229,6 +231,19 @@ class Scanner:
             for det in self.detectors
         }
 
+        # H.11 (0.4.8): coverage transparency. Build the capability report
+        # once and warn loudly — exactly once per Scanner — when the scanner
+        # is running with no active detection for an ML-dependent threat
+        # (T1 malware signatures / T4 semantic-OCR-BERT injection). A
+        # security scanner must not silently under-deliver on its promises.
+        self._coverage = build_coverage_report(self.config)
+        if self._coverage.degraded:
+            logger.warning(
+                "doc-firewall reduced-coverage mode",
+                degraded_threats=self._coverage.degraded_threats,
+                summary=self._coverage.summary_line(),
+            )
+
     def _model_paths(self) -> list[str]:
         """Collect configured ML model paths for integrity pre-check."""
         paths = []
@@ -333,6 +348,130 @@ class Scanner:
                             self._scan_archive(member_path, parent_report, depth + 1)
                     except Exception as exc:
                         logger.debug("Sub-scan error for %s: %s", relative, exc)
+
+    def _apply_coverage(self, report: ScanReport) -> None:
+        """H.11 (0.4.8): attach the coverage report and, when the caller has
+        asked to fail closed on missing capability, add an escalation
+        finding so the verdict reflects that the document was checked with
+        reduced coverage. Must run BEFORE get_verdict()."""
+        cov = self._coverage
+        report.coverage = cov.to_dict()
+
+        required = set(getattr(self.config, "required_capabilities", []) or [])
+        missing_required = sorted(
+            c.key for c in cov.capabilities if c.key in required and not c.active
+        )
+        fail_full = getattr(self.config, "require_full_coverage", False) and cov.degraded
+
+        if not (missing_required or fail_full):
+            return
+
+        reasons: list[str] = []
+        if fail_full:
+            reasons.append(
+                "no active detection capability for "
+                + ", ".join(cov.degraded_threats)
+            )
+        if missing_required:
+            reasons.append("required capabilities inactive: " + ", ".join(missing_required))
+
+        report.add(Finding(
+            threat_id=ThreatID.T1_MALWARE if "T1" in cov.degraded_threats
+            else ThreatID.T4_PROMPT_INJECTION,
+            severity=Severity.MEDIUM,
+            title="Scan ran with reduced detection coverage",
+            explain=(
+                "This document was scanned with one or more promised detection "
+                "capabilities INACTIVE, so a clean verdict cannot be fully "
+                "trusted. " + "; ".join(reasons) + "."
+            ),
+            evidence={
+                "subtype": "reduced_coverage",
+                "degraded_threats": cov.degraded_threats,
+                "missing_required": missing_required,
+                "inactive_capabilities": [
+                    {"key": c.key, "label": c.label, "remediation": c.remediation}
+                    for c in cov.inactive
+                ],
+                "evidence_unavailable_reason": (
+                    "the detectors that would produce content-level evidence "
+                    "for these threats are not installed/enabled"
+                ),
+                "debug_steps": [
+                    c.remediation for c in cov.inactive if c.key in required
+                ] or [c.remediation for c in cov.inactive],
+            },
+            module="scanner.coverage",
+            confidence=0.5,
+            # Operational: escalates verdict to FLAG, never BLOCK on its own.
+            verdict_class=VerdictClass.REVIEW,
+        ))
+
+    def _apply_unscannable_policy(self, report: ScanReport) -> None:
+        """H.13 (0.4.8): apply the configured verdict for content the scanner
+        cannot inspect (encrypted PDF/Office/archive). The analyzers tag such
+        findings with evidence['subtype']=='encrypted_unscannable'; policy is
+        applied centrally here so it lives in one place.
+
+          allow → INFO (recorded, never affects verdict)
+          warn  → REVIEW (FLAG; the default)
+          block → BLOCK (fail closed)
+        """
+        policy = getattr(self.config, "on_unscannable_verdict", "warn")
+        if policy == "warn":
+            return  # default REVIEW class already FLAGs
+        for f in report.findings:
+            if (f.evidence or {}).get("subtype") != "encrypted_unscannable":
+                continue
+            if policy == "block":
+                f.verdict_class = VerdictClass.BLOCK
+                f.severity = Severity.HIGH
+            elif policy == "allow":
+                f.verdict_class = VerdictClass.INFO
+
+    def _timeout_finding(self, stage: str, timeout_ms: int) -> Finding:
+        """H.6 (0.4.8): a stage timeout leaves the scan incomplete — the
+        document was never fully checked, so it must not silently ALLOW.
+        Emits an operational finding (NOT a DoS-attack claim) that escalates
+        the verdict to FLAG, or BLOCK when ``on_timeout_verdict='block'``."""
+        fail_closed = (
+            getattr(self.config, "on_timeout_verdict", "warn") == "block"
+        )
+        return Finding(
+            threat_id=ThreatID.T6_DOS,
+            severity=Severity.MEDIUM,
+            title=f"Scan incomplete — {stage} stage timed out",
+            explain=(
+                f"The {stage} stage exceeded its {timeout_ms / 1000:.0f}s "
+                "budget, so this document was NOT fully scanned. This is an "
+                "operational signal (large/complex documents under heavy ML "
+                "configs can exceed the budget), not evidence the document "
+                "is malicious — but an incomplete scan must not pass "
+                "silently."
+            ),
+            evidence={
+                "subtype": "scan_timeout",
+                "stage": stage,
+                "timeout_ms": timeout_ms,
+                "evidence_unavailable_reason": (
+                    f"the {stage} stage timed out before analysis finished; "
+                    "no content-level evidence could be produced"
+                ),
+                "debug_steps": [
+                    "Re-scan with a larger budget: set "
+                    f"DOC_FIREWALL_LIMITS_{stage.upper()}_TIMEOUT_MS to a "
+                    "higher value (or pass limits={...} in ScanConfig).",
+                    "Re-scan with profile='lenient' to disable the heavy ML "
+                    "detectors and isolate which stage is slow.",
+                    "Check report.timings_ms to see where the time went.",
+                ],
+            },
+            module=f"stage.{stage}",
+            confidence=0.5,
+            verdict_class=(
+                VerdictClass.BLOCK if fail_closed else VerdictClass.REVIEW
+            ),
+        )
 
     async def scan_async(
         self,
@@ -449,6 +588,9 @@ class Scanner:
             )
             report.risk_score = self.risk_model.calculate_risk(report.findings)
             enrich_findings(report.findings)
+            apply_evidence_contract(report.findings, report.file_type, report.file_path)
+            self._apply_coverage(report)
+            self._apply_unscannable_policy(report)
             report.verdict = self.risk_model.get_verdict(report.risk_score, report.findings)
             return report  # Early exit
 
@@ -538,16 +680,11 @@ class Scanner:
                     timeout=self.config.limits.fast_scan_timeout_ms / 1000.0,
                 )
             except asyncio.TimeoutError:
-                log_ctx.error("Fast scan timed out")
-                report.add(
-                    Finding(
-                        threat_id=ThreatID.T6_DOS,
-                        severity=Severity.HIGH,
-                        title="Fast scan timed out",
-                        explain="Document structure analysis exceeded time limit — possible DoS payload.",
-                        module="stage.fast_scan",
-                    )
-                )
+                log_ctx.error("Fast scan timed out — scan incomplete")
+                report.metadata.setdefault("timed_out_stages", []).append("fast_scan")
+                report.add(self._timeout_finding(
+                    "fast_scan", self.config.limits.fast_scan_timeout_ms
+                ))
             except Exception as e:
                 log_ctx.error("Fast scan error", error=str(e))
 
@@ -572,6 +709,9 @@ class Scanner:
                 report.findings, custom_threat_weights=custom_weights
             )
             enrich_findings(report.findings)
+            apply_evidence_contract(report.findings, report.file_type, report.file_path)
+            self._apply_coverage(report)
+            self._apply_unscannable_policy(report)
             report.verdict = self.risk_model.get_verdict(report.risk_score, report.findings)
             return report
 
@@ -588,6 +728,9 @@ class Scanner:
                 report.findings, custom_threat_weights=custom_weights
             )
             enrich_findings(report.findings)
+            apply_evidence_contract(report.findings, report.file_type, report.file_path)
+            self._apply_coverage(report)
+            self._apply_unscannable_policy(report)
             report.verdict = self.risk_model.get_verdict(report.risk_score, report.findings)
             return report
 
@@ -620,6 +763,9 @@ class Scanner:
             log_ctx.info("Skipping deep scan (score below threshold)", score=fast_score)
             report.risk_score = fast_score
             enrich_findings(report.findings)
+            apply_evidence_contract(report.findings, report.file_type, report.file_path)
+            self._apply_coverage(report)
+            self._apply_unscannable_policy(report)
             report.verdict = self.risk_model.get_verdict(report.risk_score, report.findings)
             return report
 
@@ -664,16 +810,11 @@ class Scanner:
                     timeout=self.config.limits.parse_timeout_ms / 1000.0,
                 )
             except asyncio.TimeoutError:
-                log_ctx.error("Parsing timed out")
-                report.add(
-                    Finding(
-                        threat_id=ThreatID.T6_DOS,
-                        severity=Severity.HIGH,
-                        title="Parsing timed out",
-                        explain="Document parsing exceeded time limit.",
-                        module="stage.parse",
-                    )
-                )
+                log_ctx.error("Parsing timed out — scan incomplete")
+                report.metadata.setdefault("timed_out_stages", []).append("parse")
+                report.add(self._timeout_finding(
+                    "parse", self.config.limits.parse_timeout_ms
+                ))
             except Exception as e:
                 log_ctx.error("Parsing failed", error=str(e))
                 report.add(
@@ -732,15 +873,14 @@ class Scanner:
                     )
                     report.findings.extend(format_findings)
                 except asyncio.TimeoutError:
-                    report.add(
-                        Finding(
-                            threat_id=ThreatID.T6_DOS,
-                            severity=Severity.MEDIUM,
-                            title="Format checks timed out",
-                            explain="Static analysis checks exceeded time limit.",
-                            module="stage.format_checks",
-                        )
+                    log_ctx.error("Format checks timed out — scan incomplete")
+                    report.metadata.setdefault("timed_out_stages", []).append(
+                        "format_checks"
                     )
+                    report.add(self._timeout_finding(
+                        "format_checks",
+                        self.config.limits.format_checks_timeout_ms,
+                    ))
                 except Exception as e:
                     log_ctx.error("Format checks failed", error=str(e))
             report.timings_ms["format_checks"] = t.duration_ms
@@ -786,23 +926,24 @@ class Scanner:
                     report.findings.extend(det_findings)
                 except asyncio.TimeoutError:
                     # A timeout of *our own* detector stage is an operational
-                    # event (heavy ML over a large but benign document under
-                    # the strict/full-ML config routinely exceeds the default
-                    # 5 s budget), NOT evidence that the document is a DoS
-                    # attack. Emitting a T6_DOS finding here misclassified
-                    # slow-but-benign files (e.g. multi-page resumes) and
-                    # drove the verdict on empty evidence. Real resource-
-                    # exhaustion is detected with concrete evidence by the
-                    # fast-scan / parse-stage T6 paths and the dedicated DoS
-                    # detectors, which run independently of this catch-all.
-                    # Record the incomplete scan in metadata (same pattern as
-                    # `skipped_detectors`) and warn, so a caller that wants to
-                    # fail closed can inspect it — but do not raise a threat.
+                    # event (heavy ML over a large but benign document can
+                    # exceed the budget), NOT evidence that the document is a
+                    # DoS attack. But the scan is incomplete, so it must not
+                    # silently ALLOW either (H.6, 0.4.8): emit the
+                    # operational timeout finding, which escalates to FLAG
+                    # (or BLOCK when on_timeout_verdict='block') while
+                    # explicitly stating it is not a malice claim.
                     log_ctx.warning(
                         "Detector stage timed out — scan incomplete",
                         timeout_ms=self.config.limits.detectors_timeout_ms,
                     )
                     report.metadata["detectors_timed_out"] = True
+                    report.metadata.setdefault("timed_out_stages", []).append(
+                        "detectors"
+                    )
+                    report.add(self._timeout_finding(
+                        "detectors", self.config.limits.detectors_timeout_ms
+                    ))
                 except Exception as e:
                     log_ctx.error("Detectors failed", error=str(e))
 
@@ -841,7 +982,13 @@ class Scanner:
                                 )
                             )
                     except asyncio.TimeoutError:
-                        log_ctx.warning("AV scan timed out")
+                        log_ctx.warning("AV scan timed out — scan incomplete")
+                        report.metadata.setdefault("timed_out_stages", []).append(
+                            "antivirus"
+                        )
+                        report.add(self._timeout_finding(
+                            "antivirus", self.config.limits.antivirus_timeout_ms
+                        ))
                     except Exception as e:
                         log_ctx.error("Antivirus failed", error=str(e))
                         report.add(
@@ -871,6 +1018,9 @@ class Scanner:
             report.findings, custom_threat_weights=custom_weights
         )
         enrich_findings(report.findings)
+        apply_evidence_contract(report.findings, report.file_type, report.file_path)
+        self._apply_coverage(report)
+        self._apply_unscannable_policy(report)
         report.verdict = self.risk_model.get_verdict(report.risk_score, report.findings)
 
         # Required-detector validation — record which required threat IDs had no findings

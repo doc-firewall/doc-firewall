@@ -17,6 +17,10 @@ try:
     _HAS_HYPOTHESIS = True
 except ImportError:
     _HAS_HYPOTHESIS = False
+    # H.10 (0.4.8): the module-level strategies below reference `st` at
+    # import time, so the marker-based skip can't save collection — skip
+    # the whole module before they evaluate.
+    pytest.skip("hypothesis not installed", allow_module_level=True)
 
 import sys
 import os
