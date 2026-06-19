@@ -2,41 +2,29 @@ from __future__ import annotations
 
 import os
 import re
+import threading
+import time
 import zipfile
 from typing import Any, Dict, Tuple
 
 from ..logger import get_logger
 
 
-def _docling_subprocess_worker(
-    source: str,
-    max_num_pages: int,
-    max_file_size_bytes: int,
-    result_queue: Any,
-    device: str = "cpu",
-) -> None:
-    """Subprocess worker for Docling PDF conversion with process-level isolation.
+def _persistent_docling_loop(task_q: Any, result_q: Any, device: str = "cpu") -> None:
+    """Long-lived Docling worker: import docling + build the converter (and lazy-
+    load its models) ONCE, then convert PDFs streamed over ``task_q``. Module-
+    level so multiprocessing 'spawn' can import it in the child.
 
-    Must be a module-level (non-nested) function so multiprocessing 'spawn'
-    can pickle and import it in the child process.
-
-    `device` is forwarded to Docling's AcceleratorOptions. Default "cpu"
-    avoids the MPS float64-unsupported error on Apple Silicon (Docling's
-    layout model uses float64 ops that MPS rejects). Pass "auto" / "cuda" /
-    "mps" / "xpu" to opt back into a GPU device.
+    Protocol: emits ``("ready", "", {})`` once initialised (or ``("fatal", …)``
+    if import/build fails), then one ``("ok"/"err", text, meta)`` per task. A
+    ``None`` task is the shutdown sentinel. Replaces the old one-shot worker that
+    re-imported docling+torch (~5 s) and rebuilt the converter for *every* PDF.
     """
-    # Re-apply env guards — spawn creates a fresh interpreter, parent env is
-    # not inherited on all platforms.
     os.environ["DOCLING_DISABLE_OCR"] = "1"
     os.environ["RAPIDOCR_DISABLE_AUTO_DOWNLOAD"] = "1"
-    # Set DOCLING_DEVICE so any code path inside Docling that re-reads the
-    # env (rather than the AcceleratorOptions object we pass) also sees CPU.
     os.environ["DOCLING_DEVICE"] = device
     try:
-        from docling.datamodel.accelerator_options import (
-            AcceleratorDevice,
-            AcceleratorOptions,
-        )
+        from docling.datamodel.accelerator_options import AcceleratorOptions
         from docling.datamodel.document import InputFormat
         from docling.datamodel.pipeline_options import PdfPipelineOptions
         from docling.document_converter import DocumentConverter, PdfFormatOption
@@ -46,24 +34,45 @@ def _docling_subprocess_worker(
         pipeline_options.do_table_structure = False
         pipeline_options.table_structure_options.do_cell_matching = False
         pipeline_options.accelerator_options = AcceleratorOptions(device=device)
-
         conv = DocumentConverter(
             allowed_formats=[InputFormat.PDF],
             format_options={
                 InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
             },
         )
-        result = conv.convert(
-            source,
-            raises_on_error=True,
-            max_num_pages=max_num_pages,
-            max_file_size=max_file_size_bytes,
-        )
-        text = result.document.export_to_markdown()
-        meta = result.document.dict()
-        result_queue.put(("ok", text, meta))
     except Exception as exc:
-        result_queue.put(("err", str(exc), {}))
+        try:
+            result_q.put(("fatal", str(exc), {}))
+        except Exception:
+            pass
+        return
+
+    try:
+        result_q.put(("ready", "", {}))
+    except Exception:
+        return
+
+    while True:
+        try:
+            task = task_q.get()
+        except Exception:
+            return
+        if task is None:  # shutdown sentinel
+            return
+        source, max_num_pages, max_file_size_bytes = task
+        try:
+            result = conv.convert(
+                source,
+                raises_on_error=True,
+                max_num_pages=max_num_pages,
+                max_file_size=max_file_size_bytes,
+            )
+            text = result.document.export_to_markdown()
+            meta = result.document.dict()
+            result_q.put(("ok", text, meta))
+        except Exception as exc:
+            result_q.put(("err", str(exc), {}))
+
 
 logger = get_logger()
 
@@ -137,8 +146,130 @@ if HAS_DOCLING:
         global _cached_converter
         if _cached_converter is not None:
             _cached_converter = None
-            
+
     atexit.register(_cleanup_converter)
+
+
+class _DoclingWorker:
+    """Manages one persistent Docling subprocess.
+
+    The old design spawned a fresh subprocess per PDF, which re-imported
+    docling+torch (~5 s) and rebuilt the converter every single file — pure
+    overhead that dominated bulk-scan time. This keeps one worker alive so that
+    cost is paid once. Hang-isolation is preserved: a conversion that exceeds
+    the timeout (or a worker that crashes) tears the worker down, and the next
+    request transparently respawns a clean one.
+    """
+
+    def __init__(self, device: str):
+        import multiprocessing as _mp
+
+        self._device = device
+        self._ctx = _mp.get_context("spawn")
+        self._proc = None
+        self._task_q = None
+        self._result_q = None
+        self._lock = threading.Lock()
+
+    def _start(self, ready_timeout: float = 300.0) -> None:
+        import queue as _q
+
+        self._stop()
+        self._task_q = self._ctx.Queue()
+        self._result_q = self._ctx.Queue()
+        self._proc = self._ctx.Process(
+            target=_persistent_docling_loop,
+            args=(self._task_q, self._result_q, self._device),
+            daemon=True,
+        )
+        self._proc.start()
+        try:
+            status, _, _ = self._result_q.get(timeout=ready_timeout)
+        except _q.Empty:
+            self._stop()
+            raise RuntimeError("Docling worker did not initialise in time")
+        if status != "ready":
+            self._stop()
+            raise RuntimeError(f"Docling worker init failed: {status}")
+
+    def _stop(self) -> None:
+        proc = self._proc
+        if proc is not None:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            try:
+                proc.join(timeout=3)
+            except Exception:
+                pass
+        for q in (self._task_q, self._result_q):
+            if q is not None:
+                try:
+                    q.close()
+                except Exception:
+                    pass
+        self._proc = None
+        self._task_q = None
+        self._result_q = None
+
+    def convert(self, source, max_num_pages, max_file_size_bytes, timeout_s):
+        """Return ``(status, text, meta)`` — status is ok / err / timeout.
+        Serialised: one conversion at a time per worker."""
+        import queue as _q
+
+        with self._lock:
+            if self._proc is None or not self._proc.is_alive():
+                self._start()
+            try:
+                self._task_q.put((source, max_num_pages, max_file_size_bytes))
+            except Exception as exc:
+                self._stop()
+                return "err", str(exc), {}
+
+            # Poll so a crashed worker is detected within ~1 s instead of
+            # blocking for the full (large) timeout.
+            deadline = time.monotonic() + timeout_s
+            while time.monotonic() < deadline:
+                try:
+                    return self._result_q.get(timeout=1.0)
+                except _q.Empty:
+                    if self._proc is None or not self._proc.is_alive():
+                        self._stop()
+                        return "err", "docling worker exited unexpectedly", {}
+            # Exceeded the per-file budget — the worker is wedged (bomb PDF).
+            self._stop()
+            return "timeout", "", {}
+
+
+_worker_lock = threading.Lock()
+_docling_worker: "_DoclingWorker | None" = None
+_docling_worker_device: "str | None" = None
+
+
+def _get_docling_worker(device: str) -> "_DoclingWorker":
+    """Process-wide singleton persistent Docling worker, keyed by device."""
+    global _docling_worker, _docling_worker_device
+    with _worker_lock:
+        if _docling_worker is None or _docling_worker_device != device:
+            if _docling_worker is not None:
+                _docling_worker._stop()
+            _docling_worker = _DoclingWorker(device)
+            _docling_worker_device = device
+        return _docling_worker
+
+
+def _shutdown_docling_worker() -> None:
+    global _docling_worker
+    with _worker_lock:
+        if _docling_worker is not None:
+            _docling_worker._stop()
+            _docling_worker = None
+
+
+import atexit as _atexit  # noqa: E402
+
+_atexit.register(_shutdown_docling_worker)
 
 
 # Namespaces
@@ -317,6 +448,25 @@ def _fallback_docx(path: str) -> Tuple[str, Dict[str, Any]]:
 # Maximum bytes for fallback PDF parser to prevent OOM on oversized files
 _MAX_FALLBACK_READ_BYTES = 8 * 1024 * 1024  # 8 MB
 
+# Above this control-character density a decoded PDF "string" is binary
+# (compressed-stream bytes the ( ) regex matched across), not text.
+_FALLBACK_MAX_CONTROL_RATIO = 0.05
+
+
+def _is_textual(s: str) -> bool:
+    """True when ``s`` reads as natural-language text rather than binary.
+    Script-agnostic: it counts C0/C1 control characters (which prose of any
+    language essentially never contains) — not alphabet membership — so
+    Chinese / Arabic / Cyrillic text is kept while compressed-stream bytes are
+    rejected."""
+    if not s:
+        return False
+    ctrl = sum(
+        1 for c in s
+        if (ord(c) < 0x20 and c not in "\t\n\r") or 0x7F <= ord(c) <= 0x9F
+    )
+    return ctrl / len(s) <= _FALLBACK_MAX_CONTROL_RATIO
+
 
 def _fallback_pdf(path: str) -> Tuple[str, Dict[str, Any]]:
     text = ""
@@ -385,6 +535,17 @@ def _fallback_pdf(path: str) -> Tuple[str, Dict[str, Any]]:
                         .replace("\\)", ")")
                         .replace("\\\\", "\\")
                     )
+
+                    # The ( ) regex also matches across compressed content
+                    # streams, where stray 0x28/0x29 bytes bracket large spans of
+                    # binary (FlateDecode) data. Feeding that undecoded binary to
+                    # the text detectors produced a flood of false positives
+                    # (T4 classifier, T3 obfuscation, script-mixing) on real
+                    # PDFs. Keep only strings that read as natural-language text;
+                    # the control-character test is script-agnostic, so genuine
+                    # non-Latin text is preserved.
+                    if not _is_textual(s_decoded):
+                        continue
 
                     # If this string is exactly one of the metadata keys, skip it
                     # (This prevents T8 payloads from leaking into T4 text scan)
@@ -486,48 +647,38 @@ def convert_with_docling(
     # We isolate it in a subprocess so SIGKILL can terminate it on timeout.
     #
     # The Docling converter is intentionally restricted to InputFormat.PDF
-    # (see _converter / _docling_subprocess_worker). DOCX is always parsed by
+    # (see _converter / _persistent_docling_loop). DOCX is always parsed by
     # _fallback_docx below, never by Docling. Spawning the Docling subprocess
     # for a non-PDF only to have Docling reject the format wastes a process
     # spawn + import and prints Docling's "does not match any allowed format"
     # rejection straight to stderr. Skip it entirely for non-PDF sources.
     is_pdf = source.lower().endswith(".pdf")
     if HAS_DOCLING and is_pdf:
-        import multiprocessing as _mp
-        import queue as _queue_mod
+        # Convert via the PERSISTENT Docling worker — it imports docling+torch
+        # and builds the converter once, then reuses them across every PDF
+        # (the old design re-paid ~5 s of imports per file). Hang-isolation is
+        # preserved: on timeout/crash the worker is killed and the next call
+        # respawns it; docling_success stays False so the fallback parser runs.
+        try:
+            worker = _get_docling_worker(device)
+            status, result_text, result_meta = worker.convert(
+                source, max_num_pages, max_file_size_bytes, timeout_s
+            )
+        except Exception as exc:
+            status, result_text, result_meta = "err", str(exc), {}
 
-        _ctx = _mp.get_context("spawn")
-        result_q = _ctx.Queue()
-        proc = _ctx.Process(
-            target=_docling_subprocess_worker,
-            args=(source, max_num_pages, max_file_size_bytes, result_q, device),
-            daemon=True,
-        )
-        proc.start()
-        proc.join(timeout=timeout_s)
-        if proc.is_alive():
+        if status == "ok":
+            text = result_text
+            meta = result_meta
+            docling_success = True
+        elif status == "timeout":
             logger.warning(
-                "Docling conversion timed out — terminating subprocess",
+                "Docling conversion timed out — worker reset",
                 source=source,
                 timeout_s=timeout_s,
             )
-            proc.terminate()
-            proc.join(timeout=2)
-            if proc.is_alive():
-                proc.kill()
-                proc.join(1)
-            # docling_success stays False; fall through to fallback parser
         else:
-            try:
-                status, result_text, result_meta = result_q.get_nowait()
-                if status == "ok":
-                    text = result_text
-                    meta = result_meta
-                    docling_success = True
-                else:
-                    logger.debug("Docling conversion failed in subprocess: %s", result_text)
-            except _queue_mod.Empty:
-                logger.debug("Docling subprocess exited without producing a result")
+            logger.debug("Docling conversion failed: %s", result_text)
 
     # 2. Run Security Artifact Extraction (Fallback parser logic)
     # We do this ALWAYS to catch T7, T8, T9 specific artifacts that Docling might

@@ -166,6 +166,43 @@ def detect_pdf_obfuscation(doc: ParsedDocument, config: ScanConfig) -> List[Find
     if b"ToUnicode" not in pdf_data:
         return findings
 
+    # W5 (0.5.0): MEASURED rendered-vs-extracted divergence. Compares the
+    # glyph-name-implied text (what renders) against the ToUnicode-extracted
+    # text (what scanners/LLMs read) per font; flags a confirmed mismatch with
+    # both strings as evidence. This is the verdict-driving signal; the
+    # structural CMap heuristic below stays INFO/audit-only.
+    if getattr(config, "enable_font_divergence", True):
+        from .font_divergence import analyze_font_divergence
+        for div in analyze_font_divergence(pdf_data):
+            findings.append(Finding(
+                threat_id=ThreatID.T3_OBFUSCATION,
+                severity=Severity.HIGH,
+                confidence=0.9,
+                title="Font/ToUnicode text divergence (rendered ≠ extracted)",
+                explain=(
+                    "This PDF's font renders one string but its /ToUnicode map "
+                    "— what text extraction and any LLM/RAG pipeline reads — "
+                    "produces a different string. "
+                    f"{div['diverging_codes']} of {div['comparable_codes']} "
+                    "compared glyphs disagree. A human reviewing the rendered "
+                    "document and the scanner/LLM see different text, which is "
+                    "a deliberate evasion technique."
+                ),
+                evidence={
+                    "subtype": "font_text_divergence",
+                    "rendered_text": div["rendered"],
+                    "extracted_text": div["extracted"],
+                    "diverging_codes": div["diverging_codes"],
+                    "comparable_codes": div["comparable_codes"],
+                    "malicious_text": (
+                        f"rendered: {div['rendered']!r} | "
+                        f"extracted: {div['extracted']!r}"
+                    )[:250],
+                },
+                module="pdf.obfuscation.font_divergence",
+                mitre_technique="T1027",
+            ))
+
     # Pass 1: scan raw bytes for uncompressed CMaps.
     entries = _parse_cmap_entries(pdf_data)
 

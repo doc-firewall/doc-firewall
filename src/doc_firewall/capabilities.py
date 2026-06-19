@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import importlib.util
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 def _module_available(name: str) -> bool:
@@ -82,6 +82,11 @@ _REGISTRY = [
         "adapter)",
     ),
     (
+        "injection_classifier", "Bundled ML injection classifier", ["T4"], ["T4"],
+        [("enable_injection_classifier", True)], [], None,
+        "bundled in the wheel (numpy-only); enabled by default",
+    ),
+    (
         "semantic_nn", "Semantic prompt-injection (embeddings)", ["T4"], ["T4"],
         [("enable_semantic_nn", False)], ["sentence_transformers"], "ml",
         "set enable_semantic_nn=True and `pip install doc-firewall[ml]`",
@@ -115,6 +120,12 @@ _REGISTRY = [
         "ole", "Legacy OLE (.doc/.xls/.ppt) + VBA-stomp parsing", ["T1", "T2"], [],
         [], ["olefile"], "ml",
         "`pip install olefile` to inspect legacy Office binaries",
+    ),
+    (
+        "pdf_decryption", "Transparent PDF decryption (scan encrypted PDFs)",
+        ["T2", "T3", "T4"], [],
+        [("enable_pdf_decryption", True)], ["pikepdf"], "crypto",
+        "`pip install doc-firewall[crypto]` to decrypt & scan encrypted PDFs",
     ),
 ]
 
@@ -181,13 +192,63 @@ class CoverageReport:
             )
         )
 
+    # W1.3 (0.5.0): populated by build_coverage_report — which languages the
+    # active layers actually cover. None on hand-built reports.
+    language_coverage: Optional[Dict[str, Any]] = None
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "degraded": self.degraded,
             "degraded_threats": self.degraded_threats,
             "threat_status": self.threat_status(),
+            "languages": self.language_coverage,
             "capabilities": [c.to_dict() for c in self.capabilities],
         }
+
+
+# Sentence-transformers models known to be multilingual (substring match).
+_MULTILINGUAL_NN_HINTS = ("multilingual", "labse", "xlm", "distiluse-base-multilingual")
+
+
+def _build_language_coverage(config: Any) -> Dict[str, Any]:
+    """W1.3: report which languages the active layers cover, so the scanner
+    never claims coverage a given config doesn't provide."""
+    from .detectors.multilingual_injection import SUPPORTED_LANGUAGES
+    from .detectors.multilingual_threats import (
+        SUPPORTED_LANGUAGES as THREAT_LANGUAGES,
+    )
+
+    keyword_on = getattr(config, "enable_multilingual_injection", True)
+    script_on = getattr(config, "enable_script_mixing", True)
+    threats_on = getattr(config, "enable_multilingual_threats", True)
+
+    nn_active = getattr(config, "enable_semantic_nn", False)
+    nn_model = str(getattr(config, "nn_model_name", "") or "").lower()
+    nn_multilingual = nn_active and any(h in nn_model for h in _MULTILINGUAL_NN_HINTS)
+
+    return {
+        # Explicit phrase coverage, always-on, no ML.
+        "keyword_languages": list(SUPPORTED_LANGUAGES) if keyword_on else [],
+        # T11/T12 (RAG-poisoning / social-engineering) multilingual keyword
+        # coverage — a conservative phrase set extending the English-only
+        # regex detectors to non-English documents.
+        "threat_keyword_languages": list(THREAT_LANGUAGES) if threats_on else [],
+        # Script-mixing flags hidden/metadata text in ANY non-dominant
+        # script — language-agnostic, so it backstops languages we ship no
+        # phrases for (covers the writing system, not the language).
+        "script_agnostic": bool(script_on),
+        # Semantic layer: english-only / multilingual / inactive.
+        "semantic": (
+            "multilingual" if nn_multilingual
+            else "english-only" if nn_active
+            else "inactive"
+        ),
+        "notes": (
+            "keyword_languages = exact-phrase coverage (no ML). "
+            "script_agnostic = hidden/metadata foreign-script detection for "
+            "any writing system. semantic = embedding-model breadth."
+        ),
+    }
 
 
 def build_coverage_report(config: Any) -> CoverageReport:
@@ -201,6 +262,15 @@ def build_coverage_report(config: Any) -> CoverageReport:
             enabled = getattr(config, "antivirus_engine", None) is not None
         missing = [p for p in packages if not _module_available(p)]
         packages_present = not missing
+        # The bundled classifier "package" is the vendored weights file.
+        if key == "injection_classifier":
+            try:
+                from .ml.injection_model import model_available
+                packages_present = model_available()
+            except Exception:
+                packages_present = False
+            if not packages_present and "bundled-model" not in missing:
+                missing = ["bundled-model"]
         active = enabled and packages_present
         caps.append(Capability(
             key=key, label=label, threats=threats, active=active,
@@ -208,4 +278,7 @@ def build_coverage_report(config: Any) -> CoverageReport:
             primary_for=list(primary_for),
             missing_packages=missing, remediation=remediation,
         ))
-    return CoverageReport(capabilities=caps)
+    return CoverageReport(
+        capabilities=caps,
+        language_coverage=_build_language_coverage(config),
+    )

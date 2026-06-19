@@ -60,12 +60,26 @@ def _malware_sigs_off() -> ScanConfig:
     return cfg
 
 
+def _fully_degraded() -> ScanConfig:
+    """Force BOTH ML-dependent threats degraded: malware sigs off AND the
+    bundled injection classifier off (W2 makes it a default-on T4 primary)."""
+    cfg = _malware_sigs_off()
+    cfg.enable_injection_classifier = False
+    return cfg
+
+
 class TestCoverageReport:
-    def test_t4_baseline_only_without_ml(self):
-        # Semantic/OCR/BERT injection layers are off by default → T4 has no
-        # active primary capability.
+    def test_t4_covered_by_default_classifier(self):
+        # W2 (0.5.0): the bundled injection classifier is a default-on T4
+        # primary capability, so T4 is NO LONGER baseline-only out of the box.
         cov = build_coverage_report(ScanConfig(profile="balanced"))
-        assert cov.degraded
+        assert "T4" not in cov.degraded_threats
+        assert cov.threat_status().get("T4") == "active"
+
+    def test_t4_degrades_when_classifier_off(self):
+        cfg = ScanConfig(profile="balanced")
+        cfg.enable_injection_classifier = False
+        cov = build_coverage_report(cfg)
         assert "T4" in cov.degraded_threats
 
     def test_malware_sigs_off_degrades_t1(self):
@@ -73,14 +87,14 @@ class TestCoverageReport:
         assert "T1" in cov.degraded_threats
 
     def test_summary_line_lists_remediation(self):
-        cov = build_coverage_report(_malware_sigs_off())
+        cov = build_coverage_report(_fully_degraded())
         line = cov.summary_line()
         assert "REDUCED-COVERAGE" in line
         # Names at least one concrete remediation (a flag or pip extra).
         assert "enable_" in line or "pip install" in line or "antivirus" in line
 
     def test_threat_status_marks_baseline_only(self):
-        status = build_coverage_report(_malware_sigs_off()).threat_status()
+        status = build_coverage_report(_fully_degraded()).threat_status()
         assert status.get("T1") == "baseline-only"
         assert status.get("T4") == "baseline-only"
 
@@ -124,7 +138,16 @@ class TestReportCoverageAttached:
     def test_report_carries_coverage(self, tmp_path):
         r = Scanner(ScanConfig(profile="balanced")).scan(_benign_docx(tmp_path))
         assert r.coverage is not None
-        assert "degraded" in r.coverage
+        assert "degraded" in r.coverage and isinstance(r.coverage["degraded"], bool)
+        assert "languages" in r.coverage and "capabilities" in r.coverage
+
+    def test_degraded_reflected_when_layers_off(self, tmp_path):
+        cfg = ScanConfig(profile="balanced")
+        cfg.enable_yara = False
+        cfg.enable_builtin_yara_rules = False
+        cfg.antivirus_engine = None
+        cfg.enable_injection_classifier = False
+        r = Scanner(cfg).scan(_benign_docx(tmp_path))
         assert r.coverage["degraded"] is True
 
     def test_default_does_not_escalate_benign(self, tmp_path):
@@ -140,7 +163,13 @@ class TestReportCoverageAttached:
 
 class TestFailClosed:
     def test_require_full_coverage_escalates(self, tmp_path):
+        # Force a degraded config (malware sigs + classifier off) so
+        # require_full_coverage has something to escalate on.
         cfg = ScanConfig(profile="balanced")
+        cfg.enable_yara = False
+        cfg.enable_builtin_yara_rules = False
+        cfg.antivirus_engine = None
+        cfg.enable_injection_classifier = False
         cfg.require_full_coverage = True
         r = Scanner(cfg).scan(_benign_docx(tmp_path))
         assert r.verdict in (Verdict.FLAG, Verdict.BLOCK)
@@ -166,3 +195,34 @@ class TestFailClosed:
         assert r.verdict in (Verdict.FLAG, Verdict.BLOCK)
         assert cov_findings
         assert "semantic_nn" in cov_findings[0].evidence["missing_required"]
+
+
+# ── W1.3 (0.5.0): language coverage axis ─────────────────────────────────────
+
+class TestLanguageCoverage:
+    def test_default_has_keyword_and_script_agnostic(self):
+        cov = build_coverage_report(ScanConfig(profile="balanced"))
+        lc = cov.to_dict()["languages"]
+        assert lc["script_agnostic"] is True
+        assert "zh" in lc["keyword_languages"] and "ru" in lc["keyword_languages"]
+        assert len(lc["keyword_languages"]) == 15
+        # No multilingual semantic model by default.
+        assert lc["semantic"] in ("inactive", "english-only")
+
+    def test_strict_profile_semantic_multilingual(self):
+        cov = build_coverage_report(ScanConfig(profile="strict"))
+        lc = cov.to_dict()["languages"]
+        assert lc["semantic"] == "multilingual"
+
+    def test_disabling_keyword_layer_empties_languages(self):
+        cfg = ScanConfig(profile="balanced")
+        cfg.enable_multilingual_injection = False
+        lc = build_coverage_report(cfg).to_dict()["languages"]
+        assert lc["keyword_languages"] == []
+
+    def test_english_only_nn_reported(self):
+        cfg = ScanConfig(profile="balanced")
+        cfg.enable_semantic_nn = True
+        cfg.nn_model_name = "all-MiniLM-L6-v2"
+        lc = build_coverage_report(cfg).to_dict()["languages"]
+        assert lc["semantic"] == "english-only"

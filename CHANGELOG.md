@@ -5,6 +5,131 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-06-18
+
+Theme: **detect injection in any language, act on what you find, and catch
+what the patterns miss.** Adds multilingual threat detection, transparent PDF
+decryption, document sanitization for safe RAG ingestion, and a default-on ML
+classifier — all with no extra setup.
+
+### Added
+
+- **Non-English threat detection (default install, no ML).** Always-on keyword
+  layers now catch **prompt injection in 15 languages** (`multilingual_injection`)
+  and **RAG-poisoning + social-engineering lures** (`multilingual_threats`,
+  T11/T12) over body **and** metadata, plus a language-agnostic
+  **script-mixing** detector for hidden non-dominant-script text. The
+  `report.coverage["languages"]` axis reports exactly which languages and
+  layers are active, so the scanner never claims coverage it lacks.
+- **Bundled ML injection classifier (default-on, no download).** A ~8.8 KB
+  logistic-regression model over hashed char/word n-grams ships in the wheel
+  and runs on numpy alone, generalising to *paraphrased*/novel injections the
+  keyword layers miss, multilingually. REVIEW-class (can FLAG, never BLOCK
+  alone); zero benign-corpus FP. Disable via `enable_injection_classifier`.
+  *Synthetic-trained — retrain on a real corpus before primary reliance.*
+- **Sanitization output (`Scanner.sanitize`).** Produces a *cleaned copy* safe
+  for RAG ingestion: strips hidden text, dangerous metadata, macros, and active
+  content while preserving visible content, with an auditable `removed[]` list.
+  Non-destructive; per-format DOCX/PPTX/XLSX (stdlib), PDF (pikepdf-gated), CSV,
+  HTML. Round-trip verified. Config `enable_sanitization` /
+  `sanitize_remove_categories`; new docs page + `examples/14_sanitize_for_rag.py`.
+- **Transparent PDF decryption (optional `[crypto]` extra).** Encrypted PDFs
+  are decrypted and **scanned** instead of flagged blind — the common
+  empty-user-password case with no password, real protection via
+  `ScanConfig.pdf_passwords`. Graceful no-op without pikepdf. Flags
+  `enable_pdf_decryption` / `pdf_passwords`.
+- **Measured font/ToUnicode divergence (T3).** Detects the "rendered ≠
+  extracted" PDF attack — glyphs render one string while `/ToUnicode` (what
+  extraction and the LLM read) yields another. Compares per font and flags a
+  confirmed mismatch HIGH with both strings as evidence; covers both the
+  `/Differences` and the standard-base-encoding variants. Config
+  `enable_font_divergence`.
+- **Image-based-injection advisory (T3).** A no-OCR heuristic flags image-heavy
+  / low-extractable-text documents (a screenshot-of-text "résumé") for OCR
+  review. Config `enable_image_text_ratio`.
+- **Honest coverage + per-language benchmark.** `make benchmark` reports
+  per-language / per-surface recall over an in-tree 15-language corpus and
+  gates below 90% default-install recall.
+
+### Changed
+
+- **Hidden-surface + metadata extraction.** PDF non-rendered text (annotation
+  `/Contents`, form `/V`, outlines, compressed `/ObjStm`) and DOCX core/app/
+  custom OOXML properties are now extracted and scanned by the injection layers.
+- **Multilingual matcher robust to extraction noise.** Separator
+  canonicalisation + a despaced fallback defeat punctuation/whitespace spliced
+  between words (Latin) or characters (CJK) by PDF/OCR extraction.
+- **High-throughput `fast_only` mode.** Skips the deep parse + detector loop
+  (byte-level scan only); records `metadata["fast_only"]` so a shallow scan is
+  never mistaken for a full one. Plus an opt-in content-hash **result cache**
+  (`enable_result_cache`) and a **calibrate-to-your-documents** tool
+  (`scripts/calibrate_to_corpus.py`).
+- **Hardened parsers + red-team gate.** A property-based suite fuzzes every new
+  raw-bytes parser + the decryption path (~1500 inputs; no raise/hang/OOM), and
+  `make redteam` asserts 100% malicious recall with **zero** benign T4 false
+  positives across obfuscation/edit chains and their cross-products.
+- **Plain-language evidence for every threat.** Each finding now carries a
+  clear, non-technical "what we found and why it matters" explanation for **all
+  12 threat types** — a per-threat fallback replaces raw detector jargon (e.g.
+  *"Score 7.0 >= 2.0"*), with the original text preserved in `technical_detail`.
+  Non-English evidence is made readable too: multilingual findings add
+  `evidence["plain_english"]` (what the flagged foreign text actually says) and
+  a `language_name`, so a reviewer who can't read the language still understands
+  the threat.
+- **Persistent Docling worker (much faster bulk PDF scanning).** Docling
+  conversion previously spawned a fresh subprocess per PDF, which re-imported
+  docling+torch (~5 s) and rebuilt the converter *every file* — pure overhead
+  that dominated bulk-scan time. A single long-lived worker per process now
+  imports and builds the converter once and reuses it across all PDFs, removing
+  ~5 s/file. Hang-isolation is preserved: a conversion that exceeds the per-file
+  timeout, or a worker that crashes, tears the worker down and the next request
+  transparently respawns a clean one.
+- **Lower memory footprint under multi-process bulk scanning.** The package now
+  sets conservative thread/parallelism defaults at import
+  (`OMP_NUM_THREADS=1`, `TOKENIZERS_PARALLELISM=false`, `LOKY_MAX_CPU_COUNT=1`,
+  …, all via `setdefault` so callers can override), so each worker process no
+  longer spawns an OpenMP/BLAS thread and a tokenizers fork-pool per CPU core.
+  The Docling conversion subprocess's result `Queue` is now explicitly closed
+  (`close()` + `join_thread()`), fixing a per-PDF semaphore/FD/feeder-thread
+  leak (the "resource_tracker / semaphore might leak" warnings) on a long run.
+
+### Fixed
+
+- **False positives on binary PDF content (T4/T3).** When the high-quality PDF
+  parser is unavailable, the raw-bytes fallback pulled text from `( … )`
+  literals with a regex that also matched across compressed content streams —
+  surfacing undecoded FlateDecode / inline-image bytes as "text." The bundled
+  ML classifier (trained only on prose) and other text detectors scored that
+  high-entropy binary as a threat, the dominant driver of false positives on a
+  real-world benign-PDF corpus. Fixed at two layers: the fallback extractor now
+  drops non-textual `( )` spans (`_is_textual`, a script-agnostic
+  control-character test that preserves CJK/Arabic/Cyrillic prose), and the
+  classifier additionally skips non-text windows. Red-team recall stays 100% on
+  genuine natural-language injections.
+- **Memory-exhaustion DoS on adversarial spreadsheets (T6).** A malicious
+  workbook with tens of thousands of cells could drive the optional TF-IDF ATS
+  detector (`enable_advanced_tfidf`) to ~150 GB of RAM: it split the extracted
+  text into ~130k "sentences" and called `.todense()` on the
+  `(sentences × vocabulary)` TF-IDF matrix. The per-term maximum is now computed
+  on the **sparse** matrix (never densified), and both the sentence count and
+  vocabulary are capped. The deep **XLSX, PPTX, DOCX and ODF** parsers
+  additionally read every XML part through a shared hard decompression cap
+  (`analyzers/ooxml_safe.py`), so a member that under-declares its size (a
+  decompression bomb) is skipped/truncated rather than expanded into a giant
+  DOM. Scanning the full malicious-Excel corpus now stays under a few hundred MB.
+- **Risk score is now monotonic.** Deduplication kept the highest-*confidence*
+  finding per group rather than the highest-*contribution* one, so the score
+  could *decrease* when a finding was added. Now keeps max-contribution;
+  verified monotonic over 3000 property-based examples.
+- **Classifier no longer fooled by obfuscation (either direction).** Features
+  fold obfuscation (zero-width / tag chars / math-script / homoglyphs /
+  single-char separators) via `normalize_for_matching` before featurising,
+  identically at train and inference time — encoding can't move the score, and
+  a benign IT-policy sentence no longer crosses the threshold once obfuscated.
+- **Homoglyph normalizer idempotency.** A homoglyph exposed only by case-folding
+  (OHM SIGN → Ω → ω → 'w') survived one pass; the fold is re-applied after
+  lowercasing. Verified idempotent over 3000 property-based examples.
+
 ## [0.4.8] - 2026-06-10
 
 ### Added

@@ -26,7 +26,7 @@ Each entry follows the structure:
 """
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Callable
 
 from ..enums import ThreatID
 from ..report import Finding
@@ -425,27 +425,121 @@ _ENRICHMENTS: list[dict] = [
 ]
 
 
+# ── Threat-level plain-English fallback (covers ALL 12 threats) ────────────
+#
+# The specific `_ENRICHMENTS` above only recognise ~20 finding shapes. Every
+# OTHER finding used to keep the detector's raw `explain` — often jargon
+# ("Score 7.0 >= 2.0", "Token 'python' appears in 25% of all words"). This
+# table guarantees that any finding, for any of T1–T12, gets a clear "what we
+# found and why it matters" sentence a non-technical reader can act on. The
+# detector's original text is preserved in `technical_detail`.
+_THREAT_FALLBACKS: dict[ThreatID, str] = {
+    ThreatID.T1_MALWARE: (
+        "Part of this file matches a known-malware signature — it looks like "
+        "something already identified as malicious. Treat the file as dangerous: "
+        "don't open or run it, and don't pass it to other systems."
+    ),
+    ThreatID.T2_ACTIVE_CONTENT: (
+        "This file can run code or actions on its own — scripts, auto-open "
+        "actions, or macros. A document you only need to read shouldn't have to "
+        "run programs. Open it only if you trust whoever sent it."
+    ),
+    ThreatID.T3_OBFUSCATION: (
+        "Part of this document is hidden or disguised — text made invisible, "
+        "characters swapped to look like others, or content arranged to fool "
+        "automated readers. Hiding text is a common way to slip instructions "
+        "past a human while an AI still reads them."
+    ),
+    ThreatID.T4_PROMPT_INJECTION: (
+        "This document contains text that tries to give instructions to an AI "
+        "assistant — for example telling it to ignore its rules or reveal hidden "
+        "information. If an AI reads this document, it may obey the planted "
+        "instructions instead of you."
+    ),
+    ThreatID.T5_RANKING_MANIPULATION: (
+        "This document repeats words or phrases in an unnatural way to trick a "
+        "search or AI-retrieval system into ranking it higher than it deserves."
+    ),
+    ThreatID.T6_DOS: (
+        "This file is built in a way that can overwhelm the software that opens "
+        "it — for example expanding to a huge size or looping forever — which "
+        "can freeze or crash a system."
+    ),
+    ThreatID.T7_EMBEDDED_PAYLOAD: (
+        "Another file is hidden inside this one, such as a program or archive. "
+        "This is a common way to smuggle malware past scanners that only check "
+        "the outer file. Don't extract it unless you know exactly what it is."
+    ),
+    ThreatID.T8_METADATA_INJECTION: (
+        "This document carries extra information in its hidden properties — "
+        "either sensitive personal data, or content placed where a viewer won't "
+        "show it but an automated reader (like an AI) still will."
+    ),
+    ThreatID.T9_ATS_MANIPULATION: (
+        "This document — often a résumé — is stuffed with repeated keywords or "
+        "hidden text designed to trick automated screening systems into scoring "
+        "it higher than it should."
+    ),
+    ThreatID.T10_INDIRECT_INJECTION: (
+        "This document points to an outside location (a link or remote file) "
+        "together with an instruction to go fetch it — a way to pull in "
+        "malicious content or instructions from somewhere else."
+    ),
+    ThreatID.T11_RAG_POISONING: (
+        "This document contains text designed to manipulate an AI knowledge "
+        "base — for example claiming to be the only trustworthy source so the "
+        "AI ignores other documents when answering."
+    ),
+    ThreatID.T12_SOCIAL_ENGINEERING: (
+        "This document uses pressure tactics common in scams and phishing — "
+        "urgency, pretending to be an authority, or demands to pay money or "
+        "hand over passwords."
+    ),
+}
+
+
+def _apply_threat_fallback(f: Finding) -> None:
+    """Give an un-enriched finding a plain, threat-level explanation while
+    preserving its original technical text. Skips findings a detector has
+    already written a plain `evidence['plain_english']` for."""
+    base = _THREAT_FALLBACKS.get(f.threat_id)
+    if not base:
+        return
+    ev = f.evidence or {}
+    # The detector already produced a plain, self-contained explanation.
+    if isinstance(ev.get("plain_english"), str) and ev["plain_english"].strip():
+        return
+    f.technical_detail = f.technical_detail or f.explain
+    mt = ev.get("malicious_text")
+    if isinstance(mt, str) and mt.strip():
+        base += " The exact text we flagged is shown in this finding's evidence."
+    f.explain = base
+
+
 def enrich_findings(findings: list[Finding]) -> list[Finding]:
     """Mutate `findings` in place to add plain-language explanations.
 
-    For each finding that matches an entry in `_ENRICHMENTS`:
-      - The original `explain` text is moved to `technical_detail`.
-      - `explain` is replaced with the plain-English version.
-      - If the entry provides its own `technical_detail` override, that
-        wins over the original explain.
-
-    Findings that don't match any entry are left untouched (their `explain`
-    stays as the detector wrote it, `technical_detail` stays None).
+    1. If a finding matches a specific entry in `_ENRICHMENTS`, its `explain`
+       is replaced with that entry's plain-English text (original →
+       `technical_detail`).
+    2. Otherwise a threat-level fallback (`_THREAT_FALLBACKS`, one per T1–T12)
+       gives it a clear plain explanation — so NO finding is left showing only
+       raw detector jargon. Findings the detector already wrote plain
+       (`evidence['plain_english']`) keep their text.
     """
     for f in findings:
+        matched = False
         for entry in _ENRICHMENTS:
             try:
                 if entry["match"](f):
                     f.technical_detail = entry.get("technical_detail") or f.explain
                     f.explain = entry["explain"]
+                    matched = True
                     break
             except Exception:
                 # Matchers should never raise, but be defensive — a broken
                 # entry must not crash the scanner.
                 continue
+        if not matched:
+            _apply_threat_fallback(f)
     return findings

@@ -117,9 +117,21 @@ is active.
 
 ## Content the scanner can't read
 
-*New in 0.4.8.* Encrypted PDFs (`/Encrypt`) and password-protected Office
-files are a blind spot — the scanner cannot decrypt them. `on_unscannable_verdict`
-chooses the policy:
+Encrypted PDFs (`/Encrypt`) and password-protected Office files are a
+potential blind spot.
+
+**Encrypted PDFs are decrypted and scanned where possible (0.5.0).** Many
+"encrypted" PDFs use *permissions-only* encryption with an **empty user
+password** ("you can open this but not print/edit"). With the optional
+`[crypto]` extra (`pip install doc-firewall[crypto]`, pikepdf), the scanner
+decrypts these transparently — **no password needed** — and scans the full
+content; the prior blind-spot finding is downgraded to INFO. Real
+password-protected PDFs are decrypted only if the password is supplied via
+`ScanConfig.pdf_passwords`. Controlled by `enable_pdf_decryption` (default
+on; a graceful no-op without pikepdf).
+
+**What can't be decrypted** (no password, or `[crypto]` not installed, or
+password-protected Office) falls to `on_unscannable_verdict`:
 
 | value | behaviour |
 |---|---|

@@ -66,6 +66,11 @@ from .detectors.social_engineering import SocialEngineeringDetector
 from .detectors.pii import PiiDetector
 from .detectors.injection_perplexity import InjectionPerplexityDetector
 from .detectors.media_metadata import MediaMetadataDetector
+from .detectors.script_mixing import ScriptMixingDetector
+from .detectors.multilingual_injection import MultilingualInjectionDetector
+from .detectors.multilingual_threats import MultilingualThreatDetector
+from .detectors.injection_classifier import InjectionClassifierDetector
+from .detectors.image_text_ratio import ImageTextRatioDetector
 
 from .utils.circuit_breaker import CircuitBreaker, CircuitOpenError
 from .utils.hashing import sha256_file
@@ -202,6 +207,11 @@ class Scanner:
             PiiDetector(),
             InjectionPerplexityDetector(),
             MediaMetadataDetector(),
+            ScriptMixingDetector(),
+            MultilingualInjectionDetector(),
+            MultilingualThreatDetector(),
+            InjectionClassifierDetector(),
+            ImageTextRatioDetector(),
         ]
 
         # G.4: eagerly build expensive per-config detector state (compiled
@@ -236,6 +246,12 @@ class Scanner:
         # is running with no active detection for an ML-dependent threat
         # (T1 malware signatures / T4 semantic-OCR-BERT injection). A
         # security scanner must not silently under-deliver on its promises.
+        # W7 (0.5.0): opt-in content-hash result cache (RAG re-ingestion).
+        from collections import OrderedDict
+        self._result_cache: Optional["OrderedDict[str, ScanReport]"] = (
+            OrderedDict() if getattr(self.config, "enable_result_cache", False) else None
+        )
+
         self._coverage = build_coverage_report(self.config)
         if self._coverage.degraded:
             logger.warning(
@@ -417,11 +433,28 @@ class Scanner:
           warn  → REVIEW (FLAG; the default)
           block → BLOCK (fail closed)
         """
+        # W6 (0.5.0): if an encrypted PDF was transparently decrypted and its
+        # content WAS scanned, it is no longer a blind spot — downgrade the
+        # encryption finding to INFO and note the method, regardless of the
+        # unscannable policy (the policy is about content we *couldn't* read).
+        decrypted = report.metadata.get("pdf_decrypted")
         policy = getattr(self.config, "on_unscannable_verdict", "warn")
-        if policy == "warn":
+        if not decrypted and policy == "warn":
             return  # default REVIEW class already FLAGs
         for f in report.findings:
             if (f.evidence or {}).get("subtype") != "encrypted_unscannable":
+                continue
+            if decrypted:
+                f.verdict_class = VerdictClass.INFO
+                f.severity = Severity.LOW
+                f.title = "PDF was encrypted but decrypted and scanned"
+                f.explain = (
+                    "The PDF was encrypted but the scanner decrypted it "
+                    f"({decrypted}) and scanned the full content — no longer "
+                    "an un-inspectable blind spot."
+                )
+                f.evidence["decrypted"] = decrypted
+                f.evidence.pop("evidence_unavailable_reason", None)
                 continue
             if policy == "block":
                 f.verdict_class = VerdictClass.BLOCK
@@ -736,7 +769,11 @@ class Scanner:
 
         # Determine Deep Scan
         should_deep_scan = False
-        if fast_score >= self.config.thresholds.deep_scan_trigger:
+        if getattr(self.config, "fast_only", False):
+            # W7 (0.5.0): high-throughput mode — fast byte-level scan only.
+            should_deep_scan = False
+            report.metadata["fast_only"] = True
+        elif fast_score >= self.config.thresholds.deep_scan_trigger:
             should_deep_scan = True
         elif ftype == "unknown" and size_mb < self.config.limits.max_mb:
             should_deep_scan = True
@@ -884,6 +921,27 @@ class Scanner:
                 except Exception as e:
                     log_ctx.error("Format checks failed", error=str(e))
             report.timings_ms["format_checks"] = t.duration_ms
+
+            # W2 (0.5.0): bridge hidden text discovered by the fast scan
+            # (which only emits Finding objects) into the parsed doc, so the
+            # deep-scan ScriptMixingDetector can compare each hidden run's
+            # Unicode script against the document body uniformly across
+            # formats (docx hidden text otherwise never reaches the doc).
+            if parsed_doc is not None:
+                _fast_hidden = [
+                    f.evidence["hidden_text"]
+                    for f in report.findings
+                    if isinstance((f.evidence or {}).get("hidden_text"), str)
+                    and f.evidence["hidden_text"].strip()
+                ]
+                if _fast_hidden:
+                    parsed_doc.metadata["_fast_hidden_text"] = _fast_hidden
+
+                # W6 (0.5.0): surface whether an encrypted PDF was decrypted
+                # so the unscannable policy can downgrade the blind-spot
+                # finding (the content was actually scanned).
+                if parsed_doc.metadata.get("pdf_decrypted"):
+                    report.metadata["pdf_decrypted"] = parsed_doc.metadata["pdf_decrypted"]
 
             # 2c. Detectors
             with Timer() as t:
@@ -1051,6 +1109,22 @@ class Scanner:
 
     def scan(self, file_path: str, policy_name: Optional[str] = None) -> ScanReport:
         """Synchronous wrapper (blocking). Uses asyncio.run() for safety."""
+        # W7 (0.5.0): content-hash result cache. Identical content (any path)
+        # returns the cached verdict without re-scanning — for pipelines that
+        # re-ingest the same documents. Only when no per-call policy is given
+        # (a policy can change the result).
+        cache = self._result_cache
+        cache_key = None
+        if cache is not None and policy_name is None:
+            try:
+                cache_key = sha256_file(file_path)
+            except Exception:
+                cache_key = None
+            if cache_key is not None and cache_key in cache:
+                cache.move_to_end(cache_key)
+                import dataclasses
+                return dataclasses.replace(cache[cache_key], file_path=file_path)
+
         try:
             asyncio.get_running_loop()
             is_running = True
@@ -1064,12 +1138,44 @@ class Scanner:
                 future = pool.submit(
                     asyncio.run, self.scan_async(file_path, policy_name=policy_name)
                 )
-                return future.result()
+                report = future.result()
         else:
-            return asyncio.run(self.scan_async(file_path, policy_name=policy_name))
+            report = asyncio.run(self.scan_async(file_path, policy_name=policy_name))
+
+        if cache is not None and cache_key is not None:
+            cache[cache_key] = report
+            while len(cache) > self.config.result_cache_size:
+                cache.popitem(last=False)
+        return report
 
     # Alias for backward compatibility with CLI and external callers
     scan_sync = scan
+
+    def sanitize(self, file_path: str, output_path: Optional[str] = None):
+        """W3 (0.5.0): produce a cleaned copy safe for LLM/RAG ingestion.
+
+        Strips hidden/invisible text, dangerous metadata, active content and
+        located injections while preserving the visible document. Returns a
+        ``SanitizationResult`` with the cleaned-copy path and an auditable
+        list of what was removed; for formats without a sanitizer (or when
+        ``config.enable_sanitization`` is False), ``sanitized=False`` so the
+        caller can fall back to BLOCK.
+
+        The original file is never modified. ``output_path`` chooses where the
+        cleaned copy is written (default: a temp file the caller owns and
+        should delete after ingesting). Which categories are stripped is
+        controlled by ``config.sanitize_remove_categories``.
+        """
+        from .sanitize import sanitize_file
+
+        ftype = _detect_file_type_by_magic(file_path)
+        # Normalise magic identifiers (ole.doc, odf.text, …) to a base type
+        # the sanitizer dispatch understands; fall back to the extension.
+        base = ftype.split(".")[0]
+        if base in ("zip", "unknown"):
+            ext = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else ""
+            base = ext or base
+        return sanitize_file(file_path, base, self.config, output_path)
 
 
 def scan(

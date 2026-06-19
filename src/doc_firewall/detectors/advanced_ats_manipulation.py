@@ -9,6 +9,14 @@ from ..enums import ThreatID, Severity
 
 logger = logging.getLogger(__name__)
 
+# Hard caps so an adversarial document (e.g. a malicious spreadsheet with tens
+# of thousands of cells) cannot blow up memory. Without these, fitting TF-IDF
+# over every "sentence" built an (n_sentences x vocab) matrix; densifying it
+# allocated n_sentences*vocab*8 bytes — ~150 GB on a stuffed workbook.
+_MAX_TFIDF_SENTENCES = 2000   # bounds the matrix row count
+_MAX_TFIDF_FEATURES = 20000   # bounds the vocabulary (column count)
+
+
 class AdvancedATSNLPDetector(Detector):
     name = "advanced_ats_nlp"
 
@@ -20,8 +28,14 @@ class AdvancedATSNLPDetector(Detector):
         if self._vectorizer is None:
             try:
                 from sklearn.feature_extraction.text import TfidfVectorizer
-                # Configure to find high frequency keyword n-grams
-                self._vectorizer = TfidfVectorizer(stop_words='english', ngram_range=(1, 3))
+                # Configure to find high frequency keyword n-grams. max_features
+                # bounds the vocabulary so the feature space can't explode on
+                # adversarial input.
+                self._vectorizer = TfidfVectorizer(
+                    stop_words='english',
+                    ngram_range=(1, 3),
+                    max_features=_MAX_TFIDF_FEATURES,
+                )
             except ImportError:
                 logger.error("scikit-learn is not installed.")
 
@@ -129,15 +143,21 @@ class AdvancedATSNLPDetector(Detector):
             sentences = [s.strip() for s in full_text.split('.') if len(s.strip()) > 10]
             if len(sentences) < 5:
                 return findings
-                
+            # Cap the row count: an adversarial document with tens of thousands
+            # of "sentences" would otherwise build a huge matrix. Keyword
+            # stuffing is still obvious within the first few thousand sentences.
+            sentences = sentences[:_MAX_TFIDF_SENTENCES]
+
             tfidf_matrix = self._vectorizer.fit_transform(sentences)
             feature_names = self._vectorizer.get_feature_names_out()
-            dense = tfidf_matrix.todense()
-            
-            # Find the max tf-idf score for any given term across the document
-            # Abnormally high scores mean severe keyword stuffing
-            max_scores = dense.max(axis=0).tolist()[0]
-            
+
+            # Per-term max TF-IDF across the document. Computed on the SPARSE
+            # matrix — never densified — so we never allocate an
+            # (n_sentences x vocab) array. `.max(axis=0)` returns a 1 x vocab
+            # sparse row; vocab is bounded by max_features.
+            import numpy as np
+            max_scores = np.asarray(tfidf_matrix.max(axis=0).todense()).ravel()
+
             # Pair scores with features
             phrase_scores = [(feature_names[i], max_scores[i]) for i in range(len(feature_names))]
             phrase_scores.sort(key=lambda x: x[1], reverse=True)

@@ -1,4 +1,4 @@
-.PHONY: install-hooks sbom lock-deps verify-deps generate-model-manifest
+.PHONY: install-hooks sbom lock-deps verify-deps generate-model-manifest redteam
 
 ## Activate the repo's pre-commit hooks (run once after cloning).
 ## Sets git's hooksPath to .githooks/ so the committed hook scripts are used.
@@ -53,3 +53,11 @@ benchmark:
 benchmark-gate:
 	@ls benchmarks/*.json | tail -2 | xargs -n2 sh -c 'python scripts/benchmark_gate.py "$$1" "$$0"' 2>/dev/null \
 	  || python scripts/benchmark_gate.py $$(ls benchmarks/*.json | tail -1)
+
+## W8 (0.4.10): Red-team mutation gate — applies obfuscation/edit chains to
+## benign + malicious seeds and asserts 100% malicious recall with ZERO benign
+## T4 false positives. Exits non-zero on any benign false positive, so it can
+## gate a release. Excludes composed chains for speed; drop --no-composed for
+## the full cross-product.
+redteam:
+	PYTHONPATH=src:tests python -m tooling.redteam evaluate --no-composed --workers 4

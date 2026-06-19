@@ -133,6 +133,8 @@ nav:
   - Core Concepts:
     - Architecture: concepts/architecture.md
     - Evidence Contract: concepts/evidence.md
+    - Multilingual & Script-Mixing: concepts/multilingual.md
+    - Sanitization for RAG: concepts/sanitization.md
     - Threat Model: concepts/threats.md
     - Risk Scoring: concepts/risk-scoring.md
     - Policies: concepts/policies.md

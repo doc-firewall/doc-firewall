@@ -57,14 +57,22 @@ def parse_odf(path: str, config: ScanConfig) -> ParsedDocument:
 
     try:
         with zipfile.ZipFile(path, "r") as zf:
+            # Bounded decompression: read at most N bytes from the member.
+            # zf.read(name)[:N] would fully decompress the member first — a
+            # decompression bomb in content.xml could then exhaust memory
+            # before the slice. zf.open(name).read(N) stops after N bytes.
+            content_bytes = b""
             try:
-                content_bytes = zf.read("content.xml")[: 4 * 1024 * 1024]
-            except KeyError:
-                content_bytes = b""
+                with zf.open("content.xml") as f:
+                    content_bytes = f.read(4 * 1024 * 1024)
+            except Exception:
+                pass
+            meta_bytes = b""
             try:
-                meta_bytes = zf.read("meta.xml")[: 256 * 1024]
-            except KeyError:
-                meta_bytes = b""
+                with zf.open("meta.xml") as f:
+                    meta_bytes = f.read(256 * 1024)
+            except Exception:
+                pass
 
             text = _strip_xml_tags(content_bytes)
             metadata.update(_parse_meta(meta_bytes))
