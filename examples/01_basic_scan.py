@@ -5,11 +5,9 @@ This example demonstrates the simplest usage of DocFirewall: scanning a single f
 with default settings.
 """
 
-import sys
 import os
 
 # Ensure we can import doc_firewall from src if running from project root
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
 from doc_firewall import scan
 

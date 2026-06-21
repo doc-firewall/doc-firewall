@@ -157,6 +157,67 @@ def _detect_file_type_by_magic(path: str) -> str:
     return "unknown"
 
 
+_OOXML_DOC_TYPES = {"docx", "xlsx", "pptx"}
+_OLE_TYPES = {"ole", "ole.doc", "ole.xls", "ole.ppt"}
+
+
+def _format_masquerade_finding(claimed: str, actual: str) -> Optional[Finding]:
+    """Raise a T3 masquerade finding when an Office-document extension
+    disagrees with the file's real format. ``claimed`` is the type implied by
+    the extension; ``actual`` is what the magic bytes / container say.
+
+    Caught patterns (benign documents never do these):
+      • OOXML extension (.docx/.xlsx/.pptx) but OLE2 content — a legacy binary
+        (often macro-laden) renamed to look like a safe modern document.
+      • Word/PowerPoint OOXML extension but a valid ZIP with no document body
+        (a hollow / malformed OOXML package).
+      • A legacy-Office extension (.doc/.xls/.ppt) but OOXML/zip content.
+
+    Excluded: ``.xlsx`` ↔ ``zip`` — a binary workbook (.xlsb) is a legitimate
+    ZIP without ``xl/workbook.xml`` and would classify as ``zip``.
+    """
+    if claimed == actual:
+        return None
+    claimed_ooxml = claimed in _OOXML_DOC_TYPES
+    claimed_ole = claimed in _OLE_TYPES
+    dangerous = False
+    if claimed_ooxml and actual in _OLE_TYPES:
+        dangerous = True  # OOXML ext, OLE content — the classic masquerade
+    elif claimed in {"docx", "pptx"} and actual == "zip":
+        dangerous = True  # hollow OOXML word/ppt (no benign binary variant)
+    elif claimed_ole and (actual in _OOXML_DOC_TYPES or actual == "zip"):
+        dangerous = True  # legacy ext, OOXML content
+    if not dangerous:
+        return None
+    return Finding(
+        threat_id=ThreatID.T3_OBFUSCATION,
+        severity=Severity.MEDIUM,
+        title="File-type masquerade (extension does not match content)",
+        explain=(
+            f"This file's name implies a '{claimed}' document, but its actual "
+            f"content is '{actual}'. A document whose extension disagrees with "
+            "its real format is a common evasion — e.g. a legacy macro-enabled "
+            ".doc renamed .docx to slip past filters that trust the extension, "
+            "or a structurally hollow Office package. Legitimate documents do "
+            "not do this."
+        ),
+        evidence={
+            "subtype": "extension_content_mismatch",
+            "claimed_type": claimed,
+            "actual_type": actual,
+            "malicious_text": f"extension claims '{claimed}', content is '{actual}'",
+        },
+        module="format_integrity",
+        confidence=0.8,
+        mitre_technique="T1036",  # Masquerading
+        attack_objective=(
+            "Disguise a malicious or legacy-macro document as a safe modern "
+            "format to evade extension-based filtering"
+        ),
+        verdict_class=VerdictClass.REVIEW,
+    )
+
+
 class Scanner:
     def __init__(
         self,
@@ -535,12 +596,18 @@ class Scanner:
             # Determine file type by extension, then verify with magic bytes
             ftype = guess_file_type(file_path)
             magic_type = _detect_file_type_by_magic(file_path)
+            type_masquerade: Optional[tuple[str, str]] = None
             if ftype != "unknown" and magic_type != "unknown" and ftype != magic_type:
                 logger.warning(
                     "Extension/magic-byte mismatch",
                     extension_type=ftype,
                     magic_type=magic_type,
                 )
+                # An Office document whose extension disagrees with its real
+                # format is a filter-evasion masquerade (e.g. a legacy macro
+                # .doc renamed .docx, or a structurally hollow OOXML package).
+                # Capture it so a finding can be raised after the report exists.
+                type_masquerade = (ftype, magic_type)
                 ftype = magic_type  # Trust magic bytes over extension
             elif ftype == "unknown" and magic_type != "unknown":
                 ftype = magic_type
@@ -571,6 +638,16 @@ class Scanner:
 
         if effective_policy is not None:
             report.metadata["policy"] = effective_policy.name
+
+        # File-type masquerade: the extension claims an Office document but the
+        # bytes are a different (legacy-binary / hollow-OOXML) format. Real
+        # documents never do this; it is a classic filter-evasion (deliver a
+        # macro-laden .doc while it looks like a safe modern .docx). Benign
+        # .xlsb (a valid ZIP without xl/workbook.xml) is excluded.
+        if type_masquerade is not None:
+            masq = _format_masquerade_finding(*type_masquerade)
+            if masq is not None:
+                report.add(masq)
 
         # Deny list — instant BLOCK without scanning
         if effective_policy and sha.lower() in effective_policy.deny_hashes:

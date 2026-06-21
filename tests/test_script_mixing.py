@@ -193,3 +193,42 @@ class TestScriptMixingEndToEnd:
             (f.evidence or {}).get("subtype") == "hidden_foreign_script"
             for f in r.findings
         ), [f.title for f in r.findings]
+
+
+# ── Latin is never a "foreign" script (real-world FP fix, 0.5.0) ──────────
+# Cyrillic/CJK/Arabic documents legitimately carry Latin metadata (OOXML
+# property names, app names, usernames, fonts). Flagging that mis-fired on
+# ~every benign non-Latin document.
+
+_RU_BODY = "Це український документ. " + "Текст українською мовою. " * 5
+
+
+class TestLatinNotForeign:
+    def test_latin_metadata_in_cyrillic_doc_not_flagged(self):
+        doc = ParsedDocument(
+            file_path="x.docx", file_type="docx", text=_RU_BODY,
+            metadata={
+                "Application": "Microsoft Office Word",
+                "lastModifiedBy": "CharactersWithSpaces",
+                "company": "LinksUpToDate HyperlinksChanged",
+            },
+        )
+        assert _run(doc) == [], "Latin metadata in a Cyrillic doc must not flag"
+
+    def test_hidden_cjk_in_cyrillic_doc_still_flags(self):
+        # A *non-Latin* foreign script hidden in a non-Latin doc is still a
+        # real signal — only Latin is exempt.
+        doc = ParsedDocument(
+            file_path="x.docx", file_type="docx", text=_RU_BODY,
+            metadata={"hidden_text": _ZH}, docx={"hidden_text": [_ZH]},
+        )
+        finds = _run(doc)
+        assert any(f.threat_id == ThreatID.T4_PROMPT_INJECTION for f in finds)
+
+    def test_hidden_cjk_in_latin_doc_still_flags(self):
+        doc = ParsedDocument(
+            file_path="x.docx", file_type="docx", text=_EN,
+            metadata={"hidden_text": _ZH}, docx={"hidden_text": [_ZH]},
+        )
+        finds = _run(doc)
+        assert any(f.threat_id == ThreatID.T4_PROMPT_INJECTION for f in finds)

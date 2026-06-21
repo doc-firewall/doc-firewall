@@ -95,6 +95,71 @@ classifier — all with no extra setup.
 
 ### Fixed
 
+- **VBA macro detection now works zero-dependency — major malicious `.doc`
+  recall gain (D.3).** Two compounding gaps left legacy-Office macro detection
+  largely inert: (1) the OLE/VBA scanner was gated on the optional `olefile`
+  package, which was not actually a declared dependency and was absent in
+  practice, so the entire legacy-OLE path (VBA-stomp, API byte-scan, parsing)
+  silently produced nothing; and (2) even with `olefile`, VBA source is stored
+  **compressed** (MS-OVBA 2.4, LZ-based), so the byte-level scan only caught
+  strings that survived uncompressed in P-code/project metadata (~27% recall on
+  a real phishing corpus). Both are fixed in pure stdlib, befitting an air-gapped
+  scanner:
+    - A new zero-dependency **Compound File Binary reader**
+      (`analyzers/ole/cfb.py`) provides the olefile-compatible subset
+      (`listdir`/`openstream`) the scanner needs, with bounded allocations,
+      sector-cycle guards, and a never-raises contract. `olefile` is still used
+      automatically when installed; otherwise the stdlib reader takes over, so
+      legacy `.doc`/`.xls`/`.ppt` and embedded `vbaProject.bin` are always
+      inspectable. The `ole` coverage capability is now always active.
+    - `_vba_decompress` implements MS-OVBA 2.4 (with chunk-signature validation,
+      so trailing slack/padding terminates cleanly) and `_vba_source_from_stream`
+      locates the compressed source after the P-code prefix. The decompressed
+      source is scanned for dropper patterns: `AutoOpen`/`Document_Open` +
+      network-download or shell API (`URLDownloadToFile`, `WScript.Shell`,
+      `CreateObject`, `powershell`, …) → **T2 HIGH** (`vba_dropper` /
+      `vba_autorun_shell`); a high-risk network API alone → **T2 MEDIUM**
+      (`vba_high_risk_api`). `AutoOpen` alone with no dangerous API (common in
+      benign corporate templates) is **not** flagged.
+  Detection logic is isolated in `_check_vba_sources` for direct unit testing.
+  30 new tests across `tests/test_vba_macro_detection.py` and
+  `tests/test_cfb_reader.py` (the latter builds real CFB containers with a
+  pure-Python writer and proves end-to-end dropper detection with `olefile`
+  absent).
+- **File-type masquerade detection (T3) — major malicious-Word recall gain.** A
+  file whose extension claims an Office document but whose bytes are a different
+  format (a legacy OLE binary renamed `.docx`, or a hollow OOXML package with no
+  document body) is a classic filter-evasion. The scanner detected the
+  extension/magic-byte mismatch but only logged it; it now raises a finding.
+  This lifted malicious-`.docx` recall on a real phishing corpus from ~5% to
+  ~100% (most were legacy macro `.doc` masquerading as `.docx`) with no benign
+  false positives — the benign binary-workbook (`.xlsb`, a valid ZIP without
+  `xl/workbook.xml`) case is explicitly excluded.
+- **Script-mixing no longer flags Latin in non-Latin documents (T4).** The
+  language-agnostic script-mixing detector treated Latin runs as "foreign" in a
+  Cyrillic/CJK/Arabic document — but Latin is the universal script for tooling
+  metadata (OOXML property names like `lastModifiedBy`/`CharactersWithSpaces`,
+  app names, fonts, usernames), so it mis-fired on ~every benign non-Latin file.
+  Latin is now exempt; a genuine English injection hidden in a non-Latin
+  document is still caught by the English regex/keyword layers. Non-Latin
+  foreign scripts (hidden CJK in a Cyrillic doc, etc.) still flag.
+- **PII presence no longer flags benign documents (T8).** The PII detector
+  reported names / emails / phone / card numbers as a verdict-driving HIGH
+  finding — so résumés, finance spreadsheets, and most real business documents
+  (which legitimately contain PII) were flagged as threats (~88–100% of a real
+  benign spreadsheet/résumé corpus). PII is now **INFO-class**: still fully
+  reported, with the sensitivity severity preserved, but it does not push the
+  verdict to FLAG/BLOCK on its own. Callers who want PII to gate can re-weight
+  T8 or escalate it.
+- **Injection classifier retrained on real benign text (T4).** The bundled
+  classifier was synthetic-trained and mis-scored dense multilingual
+  spreadsheet cells (names, dates, short words across languages) as injection,
+  the dominant remaining false-positive source on real spreadsheets. It is now
+  also trained on real benign windows (`scripts/_benign_real_samples.py`) and
+  recalibrated; red-team recall stays 100% and the synthetic benchmark gate
+  still passes. Combined with the PII fix, measured benign false-positive rate
+  on a real corpus dropped from ~92% to ~7% (spreadsheets), ~100% to ~7%
+  (résumés), and ~45% to ~16% (Word).
 - **False positives on binary PDF content (T4/T3).** When the high-quality PDF
   parser is unavailable, the raw-bytes fallback pulled text from `( … )`
   literals with a regex that also matched across compressed content streams —

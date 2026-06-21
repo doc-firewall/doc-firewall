@@ -10,7 +10,6 @@ import os
 import sys
 
 # Ensure we can import doc_firewall from src if running from project root
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
 import argparse
 from doc_firewall import Scanner, ScanConfig

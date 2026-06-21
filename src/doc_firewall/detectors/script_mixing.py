@@ -37,6 +37,16 @@ _MITRE = "T1027"
 _MIN_HIDDEN_CHARS = 8       # hidden text: lower bar (hidden + foreign is strong)
 _MIN_METADATA_CHARS = 12    # metadata: higher bar (names live here)
 
+# Scripts that are NEVER treated as a "foreign" injection signal, even in a
+# non-Latin document. Latin is the universal script for tooling metadata —
+# OOXML property names (lastModifiedBy, CharactersWithSpaces, ...), app names
+# ("Microsoft Office Word"), font names, usernames, URLs — and appears in
+# essentially every document regardless of its language. Flagging Latin runs in
+# a Cyrillic/CJK/Arabic document false-positives on ~every real non-Latin file.
+# The genuine "English injection hidden in a non-Latin doc" case is already
+# covered by the English prompt-injection regex/keyword layers.
+_IGNORED_FOREIGN_SCRIPTS = {"LATIN"}
+
 # Human-readable script labels for explanations.
 _SCRIPT_LABEL = {
     "LATIN": "Latin", "CYRILLIC": "Cyrillic", "GREEK": "Greek",
@@ -97,6 +107,8 @@ class ScriptMixingDetector(Detector):
             for group, count, sample in foreign_script_runs(
                 content, dom, _MIN_HIDDEN_CHARS
             ):
+                if group in _IGNORED_FOREIGN_SCRIPTS:
+                    continue
                 findings.append(Finding(
                     threat_id=ThreatID.T4_PROMPT_INJECTION,
                     severity=Severity.HIGH,
@@ -133,7 +145,10 @@ class ScriptMixingDetector(Detector):
             k: v for k, v in (doc.metadata or {}).items() if k not in _HIDDEN_KEYS
         }
         for value in _collect_metadata_strings(meta_for_values):
-            runs = foreign_script_runs(value, dom, _MIN_METADATA_CHARS)
+            runs = [
+                r for r in foreign_script_runs(value, dom, _MIN_METADATA_CHARS)
+                if r[0] not in _IGNORED_FOREIGN_SCRIPTS
+            ]
             if not runs:
                 continue
             group, count, sample = runs[0]

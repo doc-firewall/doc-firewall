@@ -117,9 +117,11 @@ _REGISTRY = [
         "set enable_media_metadata_scan=True and `pip install mutagen`",
     ),
     (
-        "ole", "Legacy OLE (.doc/.xls/.ppt) + VBA-stomp parsing", ["T1", "T2"], [],
-        [], ["olefile"], "ml",
-        "`pip install olefile` to inspect legacy Office binaries",
+        "ole", "Legacy OLE (.doc/.xls/.ppt) + VBA macro/stomp parsing",
+        ["T1", "T2"], [],
+        [], [], None,
+        "always available (zero-dependency stdlib CFB reader; "
+        "`olefile` is used automatically if installed)",
     ),
     (
         "pdf_decryption", "Transparent PDF decryption (scan encrypted PDFs)",

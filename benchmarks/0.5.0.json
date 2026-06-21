@@ -1,6 +1,6 @@
 {
   "version": "0.5.0",
-  "date": "2026-06-16",
+  "date": "2026-06-20",
   "profile": "balanced",
   "adversarial": {
     "n": 120,
@@ -57,13 +57,13 @@
     "fp_ids": []
   },
   "evidence_contract": {
-    "required": 276,
-    "satisfied": 276,
+    "required": 271,
+    "satisfied": 271,
     "compliance": 1.0
   },
   "timing_ms": {
-    "p50": 35.4,
-    "p95": 5518.9,
+    "p50": 36.2,
+    "p95": 436.1,
     "scans": 365
   }
 }
