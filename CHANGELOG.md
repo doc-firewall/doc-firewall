@@ -95,6 +95,14 @@ classifier — all with no extra setup.
 
 ### Security
 
+- **Bumped `torch` to `>=2.12.1`** (memory corruption via `torch.jit.script` in
+  `torch <= 2.12.0`). Raised the floor in `pyproject.toml` and properly
+  regenerated the pinned hash set in `requirements-docker.txt`: the lockfile
+  carries no Linux CUDA transitive deps (it is compiled off-Linux) and torch's
+  platform-independent requirements are unchanged between 2.11.0 and 2.12.1, so
+  the torch line + its 24 PyPI-2.12.1 distribution hashes were the only required
+  change (torchvision 0.26.0 already matches). `tests/fuzz-requirements.txt`
+  pins no torch and needed no change.
 - **HTML sanitizer `<script>` removal hardened** (CodeQL `js/bad-tag-filter`,
   HIGH). The block regex closed on `</script\s*>` only, so a script whose end
   tag carried trailing characters — `<script>evil()</script foo>`,
