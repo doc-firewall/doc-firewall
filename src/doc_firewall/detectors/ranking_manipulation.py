@@ -1,12 +1,14 @@
 from __future__ import annotations
-from typing import List
+
 from collections import Counter
-from .base import Detector
+from typing import List
+
 from ..analyzers.base import ParsedDocument
 from ..config import ScanConfig
+from ..enums import Severity, ThreatID
 from ..report import Finding
-from ..enums import ThreatID, Severity
 from .ats_manipulation import _STOP_WORDS, _strip_extraction_noise
+from .base import Detector
 
 
 class RankingManipulationDetector(Detector):
@@ -28,9 +30,14 @@ class RankingManipulationDetector(Detector):
         counts = Counter(tokens)
         most_common, freq = counts.most_common(1)[0]
         ratio = freq / max(1, len(tokens))
-        # Require both ratio threshold and minimum absolute count to avoid
-        # FPs where a legitimate domain term appears at high ratio in short text.
-        if ratio > 0.08 and freq >= 10:
+        # Require both a ratio threshold and a minimum absolute count. The
+        # threshold is set at 15%, not 8%: real topical/technical documents
+        # (a privacy policy repeating "data", a contract repeating "agreement",
+        # an insurance form repeating "policy") legitimately peak around
+        # 8-12% for their dominant term, so an 8% bar false-fired across the
+        # benign corpus. Mechanical ranking stuffing concentrates a token far
+        # higher (20%+); 15% separates the two with margin to spare.
+        if ratio > 0.15 and freq >= 12:
             return [
                 Finding(
                     threat_id=ThreatID.T5_RANKING_MANIPULATION,

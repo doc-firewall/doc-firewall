@@ -146,6 +146,15 @@ class ScanConfig(BaseSettings):
             "deep-scan pipeline on extracted cell text."
         ),
     )
+    enable_plaintext_scan: bool = Field(
+        True,
+        description=(
+            "Scan plain-text files with no magic bytes (.txt/.md/.json/.log/"
+            "source code) as text so the content detectors (prompt injection, "
+            "multilingual, script-mixing) run on them. Binary unknowns stay "
+            "empty. Plain text is the most common RAG ingestion format."
+        ),
+    )
     enable_odf: bool = Field(
         True,
         description=(
@@ -704,6 +713,16 @@ class ScanConfig(BaseSettings):
                 (r"\brespond\s+to\s+(?:all\s+|every\s+)?requests?\s+without\s+(?:any\s+)?(?:restrictions?|limitations?|filters?|constraints?|policies?)\b", 2.0),
                 (r"\b(?:previous|prior)\s+instructions?\s+(?:were|are)\s+(?:a\s+)?(?:test|false|wrong|fake|null|void|invalid|untrue)\b", 2.0),
                 (r"\byour\s+real\s+instructions?\s+(?:are|is|were)\b", 2.0),
+                # CV / resume evaluation-injection (CIC-Trap4Phish class): a
+                # candidate embeds instructions to bias an AI screener. The
+                # meta-references to the "prompt" itself never occur in a benign
+                # document, so they carry full weight; the evaluation-biasing and
+                # cross-prompt-persistence phrasings corroborate.
+                (r"\btake\s+into\s+account\s+(?:any\s+|the\s+)?(?:previous|prior)\s+prompt", 2.0),
+                (r"\bif\s+in\s+(?:a\s+|the\s+)?next\s+prompt\b", 2.0),
+                (r"\b(?:answer|respond)(?:\s+it)?\s+with\s+these\s+additional\s+constraints?\b", 1.5),
+                (r"\bgive\s+(?:an?\s+)?(?:extremely|exceptionally|highly)\s+(?:positive|negative)\s+evaluation\b", 1.5),
+                (r"\bhighlight(?:ing)?\s+(?:as\s+many\s+)?(?:positive|negative)\s+(?:points?|aspects?)\b", 1.0),
             ],
             "secrecy": [
                 (

@@ -15,7 +15,11 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
-from doc_firewall.utils.docling_convert import _fallback_pdf, _is_textual
+from doc_firewall.utils.docling_convert import (
+    _fallback_pdf,
+    _is_pdf_structure_capture,
+    _is_textual,
+)
 
 
 class TestIsTextual:
@@ -56,3 +60,57 @@ class TestFallbackPdfFiltersBinary:
         # No C0 control characters leaked into the extracted text.
         ctrl = sum(1 for c in text if (ord(c) < 0x20 and c not in "\t\n\r"))
         assert ctrl == 0, f"binary leaked into fallback text: {ctrl} control chars"
+
+
+class TestStructureOvercaptureRejected:
+    """The ( ) regex over-captures *printable* PDF object syntax when a stray
+    0x28 in a stream pairs with a later 0x29. Such structure passes the
+    control-char gate but must still be dropped — it was the dominant T4
+    BERT/classifier false-positive driver on the benign-PDF corpus."""
+
+    def test_object_syntax_capture_flagged(self):
+        # endobj / dict / width-array spans are structure, not document text.
+        assert _is_pdf_structure_capture(
+            "endstream\rendobj\r115 0 obj\r<</OPM 1/OP false/Type/ExtGState>>"
+        )
+        assert _is_pdf_structure_capture(
+            "/ColorSpace << /CS0 52 0 R >> /Font << /TT0 53 0 R >> /ProcSet [ /"
+        )
+
+    def test_width_array_capture_flagged(self):
+        assert _is_pdf_structure_capture("333 278 278 556 556 556 556 556 333 584 " * 3)
+
+    def test_glyph_name_array_flagged(self):
+        # Font /Differences encoding arrays leak as runs of /glyphname tokens.
+        assert _is_pdf_structure_capture(
+            "/space/comma/period/A/C/D/E/F/K/M/R/S/T/W/Y/a/b/c/d/e/f/h/i/k/l"
+        )
+        assert _is_pdf_structure_capture(
+            "HelveticaNeueLT Std /space/parenleft/parenright/comma/hyphen/period/zero Line 5."
+        )
+
+    def test_real_text_not_flagged(self):
+        assert not _is_pdf_structure_capture("Paperwork Reduction Act Notice.")
+        assert not _is_pdf_structure_capture("Thank you for considering my application.")
+        assert not _is_pdf_structure_capture("感谢您的耐心等待，我们会尽快回复您。")
+
+    def test_urls_and_paths_not_flagged(self):
+        # A URL or a couple of filesystem paths must survive (few /tokens).
+        assert not _is_pdf_structure_capture(
+            "Apply online at http://www.iie.org/jexchanges/programs/details now."
+        )
+        assert not _is_pdf_structure_capture("See /tmp/output and /var/log/app for logs.")
+
+    def test_fallback_drops_structure_keeps_prose(self, tmp_path):
+        p = tmp_path / "s.pdf"
+        # A ( ) that spans object syntax, plus a separate real text string.
+        p.write_bytes(
+            b"%PDF-1.5\n"
+            b"BT (Paperwork Reduction Act Notice) Tj ET\n"
+            b"5 0 obj(stuff\rendstream\rendobj\r6 0 obj<</Type/Font/Subtype/Type1"
+            b"/Widths[333 278 556 556]/FontDescriptor 7 0 R>>)\n%%EOF\n"
+        )
+        text, _ = _fallback_pdf(str(p))
+        assert "Paperwork Reduction Act Notice" in text
+        for marker in ("endobj", "endstream", "<</Type", "/Widths", "/FontDescriptor"):
+            assert marker not in text, f"PDF structure leaked: {marker!r}"

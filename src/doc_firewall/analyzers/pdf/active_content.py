@@ -1,12 +1,15 @@
 from __future__ import annotations
-from typing import List, Dict, Any
+
 import os
 import re
-from ...report import Finding
-from ...enums import ThreatID, Severity, VerdictClass
+from typing import Any, Dict, List
+
 from ...config import ScanConfig
+from ...enums import Severity, ThreatID, VerdictClass
+from ...report import Finding
 from ..base import ParsedDocument
 from .action_resolver import resolve_pdf_actions, summarize_actions
+from .js_risk import benign_js_only
 from .uri_classify import classify_pdf_uris
 
 # Tokens that always indicate active behaviour in a PDF. /URI and /AcroForm
@@ -92,6 +95,26 @@ def detect_pdf_active_content(doc: ParsedDocument, config: ScanConfig) -> List[F
                         "resolved and is included in the evidence "
                         "(malicious_text)."
                     )
+
+        # JS risk tiering: when the document's active content is benign
+        # form/viewer JavaScript (incl. compressed) and there is no dangerous
+        # non-JS action token, demote to INFO. Ubiquitous in benign
+        # AcroForm/government PDFs; recall on dangerous JS is untouched.
+        if (
+            verdict_class == VerdictClass.REVIEW
+            and (hit_tokens & {"/JavaScript", "/JS", "/AA", "/OpenAction"})
+            and benign_js_only(blob)
+        ):
+            sev = Severity.LOW
+            verdict_class = VerdictClass.INFO
+            evidence["js_risk"] = "benign"
+            explain = (
+                "The document's JavaScript was resolved and uses only benign "
+                "form/viewer APIs (field calculation/formatting, viewer checks) "
+                "with no code-execution, network or data-exfiltration primitive, "
+                "and no dangerous non-JS action is present. Recorded for audit — "
+                "not a verdict driver."
+            )
 
         findings.append(
             Finding(

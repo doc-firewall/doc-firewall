@@ -187,7 +187,7 @@ class _DoclingWorker:
             status, _, _ = self._result_q.get(timeout=ready_timeout)
         except _q.Empty:
             self._stop()
-            raise RuntimeError("Docling worker did not initialise in time")
+            raise RuntimeError("Docling worker did not initialise in time") from None
         if status != "ready":
             self._stop()
             raise RuntimeError(f"Docling worker init failed: {status}")
@@ -468,6 +468,45 @@ def _is_textual(s: str) -> bool:
     return ctrl / len(s) <= _FALLBACK_MAX_CONTROL_RATIO
 
 
+# PDF structural keywords that legitimate document prose never contains. The
+# `( ... )` text-string regex below over-captures whenever a stray 0x28 byte in
+# a binary content stream pairs with a later 0x29: the captured span then holds
+# the surrounding object syntax (``endobj``, ``<</Type/Font...>>``, width
+# arrays). That span is mostly *printable*, so the C0/C1 control-char gate in
+# `_is_textual` passes it — and the raw PDF structure then floods the text
+# detectors (T4 BERT/classifier, T3 obfuscation) with false positives on real
+# PDFs. These markers identify such an over-capture so it can be dropped.
+_PDF_STRUCT_MARKERS = (
+    "endobj", "endstream", "stream\r", "stream\n", " 0 obj", " 0 R",
+    "/FlateDecode", "/ExtGState", "/ProcSet", "/MediaBox", "/CropBox",
+    "/XObject", "/ColorSpace", "/Subtype", "/Resources", "/Contents",
+    "/BBox", "/Matrix", "/Type/", "/Type ", "/Font", "<</", "/Pages",
+)
+
+
+# A font /Differences encoding array is a run of /glyphname tokens, e.g.
+# "/space/comma/period/A/C/D/...". A URL path ("/a/b") never reaches five such
+# tokens back-to-back, so this matches font tables without touching real text.
+_GLYPH_NAME_RUN_RE = re.compile(r"(?:/[A-Za-z][A-Za-z0-9]*){5,}")
+
+
+def _is_pdf_structure_capture(s: str) -> bool:
+    """True when a decoded ``( ... )`` string is really an over-capture across
+    PDF object syntax rather than a genuine document text-show string."""
+    if any(m in s for m in _PDF_STRUCT_MARKERS):
+        return True
+    # Glyph-width / encoding arrays and xref spans: long runs dominated by
+    # digits, spaces and punctuation with almost no letters are not prose.
+    if len(s) > 40:
+        alpha = sum(1 for c in s if c.isalpha())
+        if alpha / len(s) < 0.25:
+            return True
+    # Font /Differences glyph-name arrays ("/space/comma/period/A/C/D/…").
+    if _GLYPH_NAME_RUN_RE.search(s):
+        return True
+    return False
+
+
 def _fallback_pdf(path: str) -> Tuple[str, Dict[str, Any]]:
     text = ""
     meta = {}
@@ -545,6 +584,12 @@ def _fallback_pdf(path: str) -> Tuple[str, Dict[str, Any]]:
                     # the control-character test is script-agnostic, so genuine
                     # non-Latin text is preserved.
                     if not _is_textual(s_decoded):
+                        continue
+
+                    # Drop spans where the ( ) regex ran across PDF object syntax
+                    # (endobj / dict / width arrays) — printable, so _is_textual
+                    # passes them, but they are structure, not document text.
+                    if _is_pdf_structure_capture(s_decoded):
                         continue
 
                     # If this string is exactly one of the metadata keys, skip it

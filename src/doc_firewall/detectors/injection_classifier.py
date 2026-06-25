@@ -23,6 +23,7 @@ from ..config import ScanConfig
 from ..enums import Severity, ThreatID, VerdictClass
 from ..ml.injection_model import load_model
 from ..report import Finding
+from ..utils.text_quality import looks_like_prose
 from .base import Detector
 
 _MITRE = "T1059"
@@ -43,25 +44,6 @@ def _windows(text: str) -> List[str]:
         if len(out) >= _MAX_WINDOWS:
             break
     return out
-
-
-# A prompt injection is natural-language text. Raw byte extraction from a PDF
-# (when the high-quality parser is unavailable) yields undecoded FlateDecode /
-# inline-image streams — high-entropy binary that the classifier, trained only
-# on prose, scores as injection. Natural language of ANY script carries almost
-# no C0/C1 control characters; a compressed stream is dense with them. Windows
-# above this control-character density are skipped — they are not text.
-_MAX_CONTROL_RATIO = 0.02
-
-
-def _control_ratio(s: str) -> float:
-    if not s:
-        return 0.0
-    ctrl = sum(
-        1 for c in s
-        if (ord(c) < 0x20 and c not in "\t\n\r") or 0x7F <= ord(c) <= 0x9F
-    )
-    return ctrl / len(s)
 
 
 class InjectionClassifierDetector(Detector):
@@ -95,9 +77,11 @@ class InjectionClassifierDetector(Detector):
         best_p = 0.0
         best_win = ""
         for win in _windows(text):
-            # Skip non-text windows (binary / compressed PDF streams surfaced by
-            # the raw-bytes fallback parser) — the model only reasons about prose.
-            if _control_ratio(win) > _MAX_CONTROL_RATIO:
+            # Skip non-prose windows — binary / compressed PDF streams, glyph and
+            # width tables, and id/timestamp dumps surfaced by the raw-bytes
+            # fallback parser. The model only reasons about natural language, and
+            # a real injection is prose, so this gate costs no recall.
+            if not looks_like_prose(win):
                 continue
             p = model.score(win)
             if p > best_p:

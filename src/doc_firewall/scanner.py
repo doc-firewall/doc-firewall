@@ -1,82 +1,81 @@
 from __future__ import annotations
-import os
+
 import asyncio
+import os
 import tarfile
 import tempfile
 import zipfile as _zipfile
-from typing import Optional
 from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 
-from .config import ScanConfig
-from .enums import ThreatID, Severity, Verdict, VerdictClass
-from .policy import Policy, PolicyEngine
-from .report import ScanReport, Finding
-from .risk_model import RiskModel
-from .capabilities import build_coverage_report
-from .detectors.explanations import enrich_findings
-from .detectors.evidence_contract import apply_evidence_contract
-from .analyzers.pdf.fast_scan import fast_scan_pdf
-from .analyzers.docx.fast_scan import fast_scan_docx
-from .analyzers.pptx.fast_scan import fast_scan_pptx
-from .analyzers.xlsx.fast_scan import fast_scan_xlsx
-from .analyzers.rtf.fast_scan import fast_scan_rtf
-from .analyzers.html.fast_scan import fast_scan_html
-from .analyzers.ole.fast_scan import fast_scan_ole, _CFB_MAGIC
 from .analyzers.csv.fast_scan import fast_scan_csv
-from .analyzers.odf.fast_scan import fast_scan_odf
-from .analyzers.pdf.parser import parse_pdf, ParsedDocument
-from .analyzers.docx.parser import parse_docx
-from .analyzers.pptx.parser import parse_pptx
-from .analyzers.xlsx.parser import parse_xlsx
-from .analyzers.rtf.parser import parse_rtf
-from .analyzers.html.parser import parse_html
-from .analyzers.ole.parser import parse_ole
 from .analyzers.csv.parser import parse_csv
+from .analyzers.docx.external_refs import detect_docx_external_refs
+from .analyzers.docx.fast_scan import fast_scan_docx
+from .analyzers.docx.macros import detect_docx_macros
+from .analyzers.docx.ole import detect_docx_ole_objects
+from .analyzers.docx.parser import parse_docx
+from .analyzers.html.fast_scan import fast_scan_html
+from .analyzers.html.parser import parse_html
+from .analyzers.odf.fast_scan import fast_scan_odf
 from .analyzers.odf.parser import parse_odf
+from .analyzers.ole.fast_scan import _CFB_MAGIC, fast_scan_ole
+from .analyzers.ole.parser import parse_ole
 
 # format checks
 from .analyzers.pdf.active_content import detect_pdf_active_content
+from .analyzers.pdf.fast_scan import fast_scan_pdf
 from .analyzers.pdf.obfuscation import detect_pdf_obfuscation
-from .analyzers.docx.external_refs import detect_docx_external_refs
-from .analyzers.docx.ole import detect_docx_ole_objects
-from .analyzers.docx.macros import detect_docx_macros
+from .analyzers.pdf.parser import ParsedDocument, parse_pdf
 from .analyzers.pptx.external_refs import detect_pptx_external_refs
+from .analyzers.pptx.fast_scan import fast_scan_pptx
 from .analyzers.pptx.macros import detect_pptx_macros
+from .analyzers.pptx.parser import parse_pptx
+from .analyzers.rtf.fast_scan import fast_scan_rtf
+from .analyzers.rtf.parser import parse_rtf
 from .analyzers.xlsx.external_refs import detect_xlsx_external_refs
+from .analyzers.xlsx.fast_scan import fast_scan_xlsx
 from .analyzers.xlsx.macros import detect_xlsx_macros
-from .detectors.embedded_payload import EmbeddedPayloadDetector
-from .detectors.dos_pdf import PdfDoSDetector
-from .detectors.metadata_injection import MetadataInjectionDetector
-from .detectors.ats_manipulation import ATSManipulationDetector
-from .detectors.prompt_injection import PromptInjectionDetector
-from .detectors.ranking_manipulation import RankingManipulationDetector
-from .detectors.yara import YaraDetector
-from .detectors.text_obfuscation import TextObfuscationDetector
-from .detectors.hidden_text import HiddenTextDetector
-
-from .detectors.advanced_prompt_injection import AdvancedPromptInjectionDetector
+from .analyzers.xlsx.parser import parse_xlsx
+from .capabilities import build_coverage_report
+from .config import ScanConfig
 from .detectors.advanced_ats_manipulation import AdvancedATSNLPDetector
+from .detectors.advanced_prompt_injection import AdvancedPromptInjectionDetector
+from .detectors.ats_manipulation import ATSManipulationDetector
 from .detectors.credential_leakage import CredentialLeakageDetector
-from .detectors.injection_nn import InjectionNNDetector
-from .detectors.steganography import SteganographyDetector
-from .detectors.ocr_injection import OCRInjectionDetector
+from .detectors.dos_pdf import PdfDoSDetector
+from .detectors.embedded_payload import EmbeddedPayloadDetector
+from .detectors.evidence_contract import apply_evidence_contract
+from .detectors.explanations import enrich_findings
+from .detectors.hidden_text import HiddenTextDetector
+from .detectors.image_text_ratio import ImageTextRatioDetector
 from .detectors.indirect_injection import IndirectInjectionDetector
-from .detectors.rag_poisoning import RAGPoisoningDetector
-from .detectors.social_engineering import SocialEngineeringDetector
-from .detectors.pii import PiiDetector
+from .detectors.injection_classifier import InjectionClassifierDetector
+from .detectors.injection_nn import InjectionNNDetector
 from .detectors.injection_perplexity import InjectionPerplexityDetector
 from .detectors.media_metadata import MediaMetadataDetector
-from .detectors.script_mixing import ScriptMixingDetector
+from .detectors.metadata_injection import MetadataInjectionDetector
 from .detectors.multilingual_injection import MultilingualInjectionDetector
 from .detectors.multilingual_threats import MultilingualThreatDetector
-from .detectors.injection_classifier import InjectionClassifierDetector
-from .detectors.image_text_ratio import ImageTextRatioDetector
-
+from .detectors.ocr_injection import OCRInjectionDetector
+from .detectors.pii import PiiDetector
+from .detectors.prompt_injection import PromptInjectionDetector
+from .detectors.rag_poisoning import RAGPoisoningDetector
+from .detectors.ranking_manipulation import RankingManipulationDetector
+from .detectors.script_mixing import ScriptMixingDetector
+from .detectors.social_engineering import SocialEngineeringDetector
+from .detectors.steganography import SteganographyDetector
+from .detectors.text_obfuscation import TextObfuscationDetector
+from .detectors.yara import YaraDetector
+from .enums import Severity, ThreatID, Verdict, VerdictClass
+from .logger import get_logger
+from .policy import Policy, PolicyEngine
+from .report import Finding, ScanReport
+from .risk_model import RiskModel
 from .utils.circuit_breaker import CircuitBreaker, CircuitOpenError
 from .utils.hashing import sha256_file
 from .utils.mime import guess_file_type, is_macro_template
 from .utils.timeouts import Timer
-from .logger import get_logger
 
 logger = get_logger()
 
@@ -159,6 +158,41 @@ def _detect_file_type_by_magic(path: str) -> str:
 
 _OOXML_DOC_TYPES = {"docx", "xlsx", "pptx"}
 _OLE_TYPES = {"ole", "ole.doc", "ole.xls", "ole.ppt"}
+
+
+def _parse_unknown_text(file_path: str, ftype: str, config: ScanConfig) -> ParsedDocument:
+    """Parse an unknown-type file as plain text when it reads as text.
+
+    Plain-text files (``.txt`` / ``.md`` / ``.json`` / ``.log`` / source code)
+    have no magic bytes, so the type resolver returns ``unknown`` — and the deep
+    scan previously parsed them to EMPTY text, so an injection sitting in a
+    ``.txt`` (the single most common RAG ingestion format) was never scanned.
+    This reads the content so the always-on text detectors (prompt injection,
+    multilingual, script-mixing, …) run on it. Binary content yields empty text,
+    preserving the previous behaviour for non-text unknowns. Never raises.
+    """
+    if not getattr(config, "enable_plaintext_scan", True):
+        return ParsedDocument(file_path=file_path, file_type=ftype, text="", metadata={})
+    try:
+        cap = config.limits.max_mb * 1024 * 1024
+        with open(file_path, "rb") as f:
+            raw = f.read(cap)
+    except Exception:
+        return ParsedDocument(file_path=file_path, file_type=ftype, text="", metadata={})
+    if not raw:
+        return ParsedDocument(file_path=file_path, file_type=ftype, text="", metadata={})
+    text = raw.decode("utf-8", errors="replace")
+    # Reject binary: prose of any language carries almost no C0/C1 control
+    # characters or U+FFFD replacement marks; a binary blob is dense with them.
+    sample = text[:8192]
+    noise = sum(
+        1 for c in sample
+        if (ord(c) < 0x20 and c not in "\t\n\r") or ord(c) == 0xFFFD
+        or 0x7F <= ord(c) <= 0x9F
+    )
+    if sample and noise / len(sample) > 0.05:
+        return ParsedDocument(file_path=file_path, file_type=ftype, text="", metadata={})
+    return ParsedDocument(file_path=file_path, file_type="text", text=text, metadata={})
 
 
 def _format_masquerade_finding(claimed: str, actual: str) -> Optional[Finding]:
@@ -765,8 +799,9 @@ class Scanner:
 
                 # 4. Macro-enabled template extension — elevated scrutiny (item 0.12)
                 if self.config.enable_active_content_checks and is_macro_template(file_path):
+                    from .enums import Severity as _Sev
+                    from .enums import ThreatID as _TID
                     from .report import Finding as _Finding
-                    from .enums import ThreatID as _TID, Severity as _Sev
                     findings.append(_Finding(
                         threat_id=_TID.T2_ACTIVE_CONTENT,
                         severity=_Sev.MEDIUM,
@@ -915,9 +950,7 @@ class Scanner:
                         self.config, "enable_odf", True
                     ):
                         return parse_odf(file_path, self.config)
-                    return ParsedDocument(
-                        file_path=file_path, file_type=ftype, text="", metadata={}
-                    )
+                    return _parse_unknown_text(file_path, ftype, self.config)
 
                 parsed_doc = await asyncio.wait_for(
                     loop.run_in_executor(self._executor, _parse_task),

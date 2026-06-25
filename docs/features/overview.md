@@ -21,6 +21,7 @@ DocFirewall includes a suite of specialized detectors mapped to specific threat 
 | **DOC / XLS / PPT** | ✅ | ✅ | Legacy OLE2/CFB: VBA stomping (P-code-only macros), `vbaProject.bin`, embedded OLE |
 | **CSV / TSV** | ✅ | ✅ | Formula injection (`=cmd\|`, `=WEBSERVICE`, `=HYPERLINK`), DDE payloads |
 | **ODT / ODS / ODP** | ✅ | ✅ | OpenDocument: `macro://` (CVE-2023-2255), `Scripts/`, Basic macros, hidden-text styling |
+| **Plain text** (`.txt`, `.md`, `.json`, `.log`, source code) | — | ✅ | Any UTF-8 text file with no magic bytes. The content detectors run on it (prompt injection, multilingual, script-mixing, PII) — the most common RAG ingestion format. Binary files with no magic bytes are not parsed. Toggle with `enable_plaintext_scan`. |
 | **ZIP / TAR** | ✅ | ✅ | Recursive member scan (depth 3), per-member findings |
 
 ---

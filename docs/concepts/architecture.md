@@ -1,6 +1,6 @@
 ---
 title: Architecture — Two-Stage Document Scanning Pipeline
-description: DocFirewall uses a two-stage pipeline: a fast byte-level scan (<10ms) followed by a deep semantic scan powered by Docling. Learn how the detection pipeline processes PDF, DOCX, PPTX, XLSX, RTF, HTML, legacy Office, CSV/TSV, and OpenDocument files.
+description: DocFirewall uses a two-stage pipeline: a fast byte-level scan (<10ms) followed by a deep semantic scan powered by Docling. Learn how the detection pipeline processes PDF, DOCX, PPTX, XLSX, RTF, HTML, legacy Office, CSV/TSV, OpenDocument, and plain-text files.
 ---
 
 # Architecture

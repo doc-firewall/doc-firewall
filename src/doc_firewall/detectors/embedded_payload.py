@@ -15,6 +15,19 @@ from .base import Detector
 
 logger = get_logger()
 
+# DER object identifier for PKCS#7 / CMS SignedData (1.2.840.113549.1.7.2) — the
+# structure a PDF digital signature embeds in the /Contents of its signature
+# dictionary. Digitally-signed PDFs are ubiquitous in real-world workflows
+# (government, legal, finance), so their signature blob must not be mistaken for
+# an embedded executable payload. A genuine signature is a DER SEQUENCE (0x30…)
+# whose signedData OID appears in the first few dozen bytes.
+_PKCS7_SIGNED_DATA_OID = "2a864886f70d010702"
+
+
+def _is_pkcs7_signature(blob: str) -> bool:
+    head = blob[:80].lower()
+    return head.startswith("30") and _PKCS7_SIGNED_DATA_OID in head
+
 
 class EmbeddedPayloadDetector(Detector):
     name = "embedded_payload"
@@ -141,6 +154,9 @@ class EmbeddedPayloadDetector(Detector):
                 # Exclude benign placeholder objects found in some datasets
                 if blob.upper().startswith("454D4245"):
                     continue  # "EMBE" (EMBEDDED_PLACEHOLDER)
+                # Exclude PDF digital-signature blobs (PKCS#7 SignedData).
+                if _is_pkcs7_signature(blob):
+                    continue
 
                 if len(blob) > 1024:
                     findings.append(
@@ -170,6 +186,8 @@ class EmbeddedPayloadDetector(Detector):
                 continue  # PK Zip (Office/Jar)
             if blob.upper().startswith("454D4245"):
                 continue  # EMBEDDED_PLACEHOLDER
+            if _is_pkcs7_signature(blob):
+                continue  # PDF digital signature (PKCS#7 SignedData)
 
             findings.append(
                 Finding(

@@ -13,7 +13,7 @@
 
 > 🔒 **100% Local & Air-gapped (Zero API):** DocFirewall runs completely locally on your infrastructure. **Zero data is ever sent to external APIs or third-party LLMs.** Secure your AI pipeline without compromising data privacy or compliance.
 
-Whether you are using **LangChain**, **LlamaIndex**, **Haystack**, or custom agentic workflows, DocFirewall acts as a zero-trust compliance layer. It performs strict static analysis and heuristic scanning on **PDF**, **DOCX**, **PPTX**, **XLSX**, **RTF**, **HTML**, **legacy Office (.doc/.xls/.ppt)**, **CSV/TSV**, and **OpenDocument (.odt/.ods/.odp)** files to neutralize threats—such as **Prompt Injection**, **LLM Tool-Call Injection**, **Data Exfiltration**, **XXE**, and **Zip Bombs**—**before** they reach your document parsers, vector databases, or inference engines. It provides out-of-the-box protection against vulnerabilities outlined in the **OWASP LLM Top 10** (e.g., LLM01: Prompt Injection).
+Whether you are using **LangChain**, **LlamaIndex**, **Haystack**, or custom agentic workflows, DocFirewall acts as a zero-trust compliance layer. It performs strict static analysis and heuristic scanning on **PDF**, **DOCX**, **PPTX**, **XLSX**, **RTF**, **HTML**, **legacy Office (.doc/.xls/.ppt)**, **CSV/TSV**, **OpenDocument (.odt/.ods/.odp)**, and **plain text (.txt/.md/.json/.log)** files to neutralize threats—such as **Prompt Injection**, **LLM Tool-Call Injection**, **Data Exfiltration**, **XXE**, and **Zip Bombs**—**before** they reach your document parsers, vector databases, or inference engines. It provides out-of-the-box protection against vulnerabilities outlined in the **OWASP LLM Top 10** (e.g., LLM01: Prompt Injection).
 
 ---
 
@@ -44,7 +44,7 @@ DocFirewall employs a **dual-stage scanning architecture**:
 1. **Fast Scan** — byte-level analysis of raw binary content, < 20 ms, no parsing required.
 2. **Deep Scan** — full document parsing (powered by [Docling](https://github.com/DS4SD/docling)) with semantic analysis, ML inference, and steganography checks.
 
-**Supported Formats**: PDF · DOCX · PPTX · XLSX · RTF · HTML · DOC/XLS/PPT (legacy OLE) · CSV/TSV · ODT/ODS/ODP (OpenDocument) · ZIP/TAR (recursive)
+**Supported Formats**: PDF · DOCX · PPTX · XLSX · RTF · HTML · DOC/XLS/PPT (legacy OLE) · CSV/TSV · ODT/ODS/ODP (OpenDocument) · Plain text (.txt/.md/.json/.log) · ZIP/TAR (recursive)
 
 **Security Benchmarks:**
 
@@ -74,9 +74,14 @@ For **Advanced Local ML Detection** (Requires PyTorch/Transformers/Aho-Corasick)
 ```bash
 pip install "doc-firewall[ml]"
 ```
-# Install the package from PyPI
-pip install doc-firewall
-```
+
+**OCR (reading text inside images) needs a system binary.** `[ml]` installs the
+`pytesseract` wrapper, but the Tesseract **engine** is a native binary that pip
+cannot ship — install it separately (`brew install tesseract` /
+`apt-get install tesseract-ocr` / `choco install tesseract`) only if you enable
+`enable_ocr_injection_scan`. Without it, image-based injection is not inspected
+and image-only PDFs are flagged as an uninspected blind spot. See
+[Installation → Tesseract OCR](docs/getting-started/installation.md) for details.
 
 **Contributing / local development** — after cloning, activate the repo's pre-commit hooks once:
 ```bash

@@ -7,6 +7,7 @@ from ..analyzers.base import ParsedDocument
 from ..config import ScanConfig
 from ..enums import Severity, ThreatID
 from ..report import Finding
+from ..utils.text_quality import looks_like_prose
 from .base import Detector
 from .injection_normalizer import has_obfuscation_chars, normalize_for_matching
 
@@ -772,6 +773,13 @@ class AdvancedPromptInjectionDetector(Detector):
                     best_chunk = ""
                     for chunk in chunks:
                         if not chunk.strip():
+                            continue
+                        # The transformer is prose-trained and emits confident
+                        # "injection" labels on non-prose (PDF structure, glyph
+                        # tables, id dumps, binary). A real injection is prose,
+                        # so gate on text quality — no recall cost, kills the
+                        # dominant benign-PDF false positive.
+                        if not looks_like_prose(chunk):
                             continue
                         result = self._classifier(chunk)
                         if result:
