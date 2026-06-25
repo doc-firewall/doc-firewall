@@ -152,6 +152,24 @@ class TestHtmlSanitize:
         assert "Hi" in out  # visible content kept
         os.unlink(res.output_path)
 
+    def test_strips_script_with_attributed_end_tag(self, tmp_path):
+        # Browsers terminate a <script> on `</script` + anything up to `>`
+        # (e.g. `</script foo>`, `</script\t\n bar>`). The script *body* must be
+        # removed for every such closing form, not just `</script>` — CodeQL
+        # js/bad-tag-filter regression.
+        for end in ("</script foo>", "</script\t\n bar>", "</SCRIPT x=1>"):
+            src = str(tmp_path / "x.html")
+            with open(src, "w") as f:
+                f.write(
+                    f"<html><body>ok<script>steal(document.cookie){end}"
+                    "<p>visible</p></body></html>"
+                )
+            res = sanitize_html(src)
+            out = open(res.output_path).read()
+            os.unlink(res.output_path)
+            assert "steal" not in out, f"script body survived end tag {end!r}: {out!r}"
+            assert "<script" not in out.lower()
+
 
 class TestDispatch:
     def test_unknown_type_not_sanitized(self, tmp_path):

@@ -93,6 +93,25 @@ classifier — all with no extra setup.
   (`close()` + `join_thread()`), fixing a per-PDF semaphore/FD/feeder-thread
   leak (the "resource_tracker / semaphore might leak" warnings) on a long run.
 
+### Security
+
+- **HTML sanitizer `<script>` removal hardened** (CodeQL `js/bad-tag-filter`,
+  HIGH). The block regex closed on `</script\s*>` only, so a script whose end
+  tag carried trailing characters — `<script>evil()</script foo>`,
+  `</script\t\n bar>` — was not stripped. The closing tag now matches
+  `</script` + any characters up to the next `>` (browser behaviour), while
+  `\b` still prevents `</scriptx>` from matching. Regression test added.
+- **Removed insecure `tempfile.mktemp()`** from `tests/test_xlsx_parser_bounds.py`
+  (CodeQL `py/insecure-temporary-file`, HIGH ×3) in favour of the atomic
+  `tempfile.mkstemp()` — closes the create-time race window.
+- **Bumped `pydantic-settings` to `>=2.14.2`** (GHSA-4xgf-cpjx-pc3j, MEDIUM):
+  versions `< 2.14.2` let `NestedSecretsSettingsSource` follow symlinks outside
+  `secrets_dir`, enabling local file read and bypassing `secrets_dir_max_size`.
+  Floor raised in `pyproject.toml` and pins bumped (with regenerated hashes) in
+  `requirements.txt`, `requirements-docker.txt`, `tests/fuzz-requirements.txt`,
+  and `examples/docker/requirements.txt`. DocFirewall does not use
+  `NestedSecretsSettingsSource`, so the advisory was not reachable in practice.
+
 ### Fixed
 
 - **Plain-text files were scanned as empty — injections in `.txt`/`.md` were

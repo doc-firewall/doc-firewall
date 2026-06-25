@@ -33,8 +33,8 @@ def _xlsx_with_oversized_sheet(uncompressed_mb: int = 40) -> str:
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("[Content_Types].xml", "<Types/>")
         zf.writestr("xl/worksheets/sheet1.xml", big)
-    path = tempfile.mktemp(suffix=".xlsx")
-    with open(path, "wb") as fh:
+    fd, path = tempfile.mkstemp(suffix=".xlsx")
+    with os.fdopen(fd, "wb") as fh:
         fh.write(buf.getvalue())
     return path
 
@@ -70,8 +70,8 @@ def _pptx_with_oversized_slide(uncompressed_mb: int = 40) -> str:
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("[Content_Types].xml", "<Types/>")
         zf.writestr("ppt/slides/slide1.xml", big)
-    path = tempfile.mktemp(suffix=".pptx")
-    with open(path, "wb") as fh:
+    fd, path = tempfile.mkstemp(suffix=".pptx")
+    with os.fdopen(fd, "wb") as fh:
         fh.write(buf.getvalue())
     return path
 
@@ -82,8 +82,8 @@ def _odf_with_oversized_content(uncompressed_mb: int = 40) -> str:
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("mimetype", "application/vnd.oasis.opendocument.text")
         zf.writestr("content.xml", big)
-    path = tempfile.mktemp(suffix=".odt")
-    with open(path, "wb") as fh:
+    fd, path = tempfile.mkstemp(suffix=".odt")
+    with os.fdopen(fd, "wb") as fh:
         fh.write(buf.getvalue())
     return path
 

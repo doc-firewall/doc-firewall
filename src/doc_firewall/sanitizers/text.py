@@ -66,7 +66,12 @@ def sanitize_csv(
     )
 
 
-_SCRIPT_RE = re.compile(r"<script\b.*?</script\s*>", re.IGNORECASE | re.DOTALL)
+# The closing tag matches the way browsers actually terminate a script element:
+# `</script` followed by ANY characters up to the next `>` (e.g. `</script foo>`,
+# `</script\t\n bar>`). The previous `</script\s*>` only matched optional
+# whitespace, so `<script>evil()</script x>` slipped through unsanitised
+# (CodeQL js/bad-tag-filter). `\b` keeps `</scriptx>` from matching.
+_SCRIPT_RE = re.compile(r"<script\b.*?</script\b[^>]*>", re.IGNORECASE | re.DOTALL)
 _SCRIPT_OPEN_RE = re.compile(r"<script\b[^>]*>", re.IGNORECASE)
 _EVENT_ATTR_RE = re.compile(r"\son[a-z]+\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s>]+)", re.IGNORECASE)
 _JS_HREF_RE = re.compile(r"(href|src)\s*=\s*(\"|')\s*javascript:[^\"']*\2", re.IGNORECASE)
