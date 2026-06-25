@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc-firewall"
-version = "0.4.8"
+version = "0.5.0"
 description = "LLM-aware document intake security scanning for PDF/DOCX/PPTX/XLSX"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,7 +32,7 @@ dependencies = [
   "defusedxml>=0.7.1",
   "structlog>=24.1.0",
   "pydantic>=2.0",
-  "pydantic-settings>=2.0.0",
+  "pydantic-settings>=2.14.2",  # GHSA-4xgf-cpjx-pc3j: <2.14.2 follows symlinks outside secrets_dir
   "filelock>=3.20.3",
   "pip>=26.1.2"
 ]
@@ -55,6 +55,9 @@ formats = [
   "striprtf>=0.0.26",
   "html5lib>=1.1"
 ]
+crypto = [
+  "pikepdf>=8.0.0"
+]
 dev = [
     "build",
     "twine",
@@ -74,6 +77,10 @@ doc-firewall = "doc_firewall.cli.main:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
+
+# W2 (0.5.0): ship the vendored injection classifier weights in the wheel.
+[tool.setuptools.package-data]
+doc_firewall = ["ml/*.npz"]
 
 # Ruff config lives in ruff.toml — see that file.
 

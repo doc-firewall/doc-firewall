@@ -1,12 +1,14 @@
 from __future__ import annotations
+
 import re
 from typing import List
-from .base import Detector, pattern_cache_key
+
 from ..analyzers.base import ParsedDocument
 from ..config import ScanConfig
+from ..enums import Severity, ThreatID, VerdictClass
 from ..report import Finding
-from ..enums import ThreatID, Severity, VerdictClass
 from ..utils.unicode_norm import normalize_text
+from .base import Detector, pattern_cache_key
 
 
 def _looks_like_text(content: str, min_printable_ratio: float = 0.85) -> bool:
@@ -112,7 +114,14 @@ class MetadataInjectionDetector(Detector):
         # field allow-list with a string-only fallback — injections hide in
         # custom XMP fields and even in property keys, and the old gather
         # silently dropped non-string / non-"comments"-list values.
-        targets: List[str] = _collect_metadata_strings(doc.metadata)
+        # `hex_blobs` holds binary artifacts (e.g. a PDF digital-signature
+        # PKCS#7 blob) surfaced for the T7 embedded-payload detector. They are
+        # not metadata text — scanning them here double-flagged digitally-signed
+        # PDFs (excessive-length + coincidental regex hits) on the benign corpus.
+        meta_for_t8 = doc.metadata
+        if isinstance(doc.metadata, dict) and "hex_blobs" in doc.metadata:
+            meta_for_t8 = {k: v for k, v in doc.metadata.items() if k != "hex_blobs"}
+        targets: List[str] = _collect_metadata_strings(meta_for_t8)
 
         # Also check docx specific fields if not already in metadata
         if doc.docx:

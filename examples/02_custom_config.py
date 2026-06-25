@@ -7,10 +7,8 @@ This example shows how to configure DocFirewall to:
 - Set stricter limits for file parsing
 """
 
-import sys
 import os
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
 from doc_firewall import Scanner, ScanConfig
 

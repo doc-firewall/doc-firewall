@@ -11,10 +11,8 @@ Threats Covered:
 """
 
 import os
-import sys
 
 # Ensure we can import doc_firewall from src
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
 from doc_firewall import Scanner, ScanConfig
 from doc_firewall.enums import Verdict, Severity, ThreatID

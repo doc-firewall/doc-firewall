@@ -11,6 +11,8 @@ except ImportError as e:
     ) from e
 
 from ..base import ParsedDocument
+from ..ooxml_safe import MAX_PART_BYTES as _MAX_PARSE_BYTES  # noqa: F401 (re-exported)
+from ..ooxml_safe import safe_xml_root as _safe_parse
 from ...config import ScanConfig
 from ...logger import get_logger
 
@@ -25,10 +27,8 @@ def _extract_sheet_text(
     # 1. Parse styles to find hidden fonts
     hidden_styles = set()
     if "xl/styles.xml" in zf.namelist():
-        try:
-            with zf.open("xl/styles.xml") as f:
-                styles_root = ET.parse(f).getroot()
-            
+        styles_root = _safe_parse(zf, "xl/styles.xml")
+        if styles_root is not None:
             hidden_fonts = set()
             for i, font in enumerate(styles_root.findall(".//{*}fonts/{*}font")):
                 # Check for hidden formatting (size 0/1 or white text)
@@ -45,22 +45,15 @@ def _extract_sheet_text(
                 font_id_str = xf.get("fontId")
                 if font_id_str and font_id_str.isdigit() and int(font_id_str) in hidden_fonts:
                     hidden_styles.add(i)
-        except Exception as e:
-            logger.debug("Error reading styles.xml: %s", e)
 
     # 2. XLSX uses a shared strings table for cell text
     shared_strings: List[str] = []
     if "xl/sharedStrings.xml" in zf.namelist():
-        try:
-            info = zf.getinfo("xl/sharedStrings.xml")
-            if info.file_size <= 16 * 1024 * 1024:
-                with zf.open("xl/sharedStrings.xml") as f:
-                    root = ET.parse(f).getroot()
-                for si in root.findall(".//{*}si"):
-                    parts = [t.text or "" for t in si.findall(".//{*}t") if t.text]
-                    shared_strings.append("".join(parts))
-        except Exception as e:
-            logger.debug("Error reading sharedStrings.xml: %s", e)
+        root = _safe_parse(zf, "xl/sharedStrings.xml")
+        if root is not None:
+            for si in root.findall(".//{*}si"):
+                parts = [t.text or "" for t in si.findall(".//{*}t") if t.text]
+                shared_strings.append("".join(parts))
 
     # 3. Extract text from sheets
     sheet_files = sorted(
@@ -75,11 +68,9 @@ def _extract_sheet_text(
     
     for sheet_path in sheet_files[:max_sheets]:
         try:
-            info = zf.getinfo(sheet_path)
-            if info.file_size > max_part_size:
+            root = _safe_parse(zf, sheet_path, limit=max_part_size)
+            if root is None:
                 continue
-            with zf.open(sheet_path) as f:
-                root = ET.parse(f).getroot()
             for c in root.findall(".//{*}c"):
                 # Extract text correctly
                 t_attr = c.get("t", "")
@@ -115,43 +106,34 @@ def _extract_sheet_text(
 
 def _extract_core_properties(zf: zipfile.ZipFile) -> Dict[str, Any]:
     meta: Dict[str, Any] = {}
-    if "docProps/core.xml" not in zf.namelist():
+    root = _safe_parse(zf, "docProps/core.xml")
+    if root is None:
         return meta
-    try:
-        with zf.open("docProps/core.xml") as f:
-            root = ET.parse(f).getroot()
-        for child in root:
-            tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
-            if child.text:
-                meta[tag] = child.text.strip()
-    except Exception as e:
-        logger.debug("Error reading core.xml: %s", e)
+    for child in root:
+        tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+        if child.text:
+            meta[tag] = child.text.strip()
     return meta
 
 
 def _extract_app_properties(zf: zipfile.ZipFile) -> Dict[str, Any]:
     meta: Dict[str, Any] = {}
-    if "docProps/app.xml" not in zf.namelist():
+    root = _safe_parse(zf, "docProps/app.xml")
+    if root is None:
         return meta
-    try:
-        with zf.open("docProps/app.xml") as f:
-            root = ET.parse(f).getroot()
-        for child in root:
-            tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
-            if child.text:
-                meta[tag] = child.text.strip()
-    except Exception as e:
-        logger.debug("Error reading app.xml: %s", e)
+    for child in root:
+        tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+        if child.text:
+            meta[tag] = child.text.strip()
     return meta
 
 
 def _extract_custom_properties(zf: zipfile.ZipFile) -> Dict[str, Any]:
     meta: Dict[str, Any] = {}
-    if "docProps/custom.xml" not in zf.namelist():
+    root = _safe_parse(zf, "docProps/custom.xml")
+    if root is None:
         return meta
     try:
-        with zf.open("docProps/custom.xml") as f:
-            root = ET.parse(f).getroot()
         for prop in root.findall(".//{http://schemas.openxmlformats.org/officeDocument/2006/custom-properties}property"):
             name = prop.get("name")
             value_elem = prop.find(".//")
@@ -161,18 +143,20 @@ def _extract_custom_properties(zf: zipfile.ZipFile) -> Dict[str, Any]:
         logger.debug("Error reading custom.xml: %s", e)
     return meta
 
-def _extract_comments(zf: zipfile.ZipFile) -> str:
+def _extract_comments(zf: zipfile.ZipFile, max_parts: int = 64) -> str:
     texts: list[str] = []
+    seen = 0
     for n in zf.namelist():
         if n.startswith("xl/comments") and n.endswith(".xml"):
-            try:
-                with zf.open(n) as f:
-                    root = ET.parse(f).getroot()
-                for t in root.itertext():
-                    if t and t.strip():
-                        texts.append(t.strip())
-            except Exception:
-                pass
+            seen += 1
+            if seen > max_parts:
+                break
+            root = _safe_parse(zf, n)
+            if root is None:
+                continue
+            for t in root.itertext():
+                if t and t.strip():
+                    texts.append(t.strip())
     return " ".join(texts)
 
 

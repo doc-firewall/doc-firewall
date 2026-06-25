@@ -1,77 +1,81 @@
 from __future__ import annotations
-import os
+
 import asyncio
+import os
 import tarfile
 import tempfile
 import zipfile as _zipfile
-from typing import Optional
 from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 
-from .config import ScanConfig
-from .enums import ThreatID, Severity, Verdict, VerdictClass
-from .policy import Policy, PolicyEngine
-from .report import ScanReport, Finding
-from .risk_model import RiskModel
-from .capabilities import build_coverage_report
-from .detectors.explanations import enrich_findings
-from .detectors.evidence_contract import apply_evidence_contract
-from .analyzers.pdf.fast_scan import fast_scan_pdf
-from .analyzers.docx.fast_scan import fast_scan_docx
-from .analyzers.pptx.fast_scan import fast_scan_pptx
-from .analyzers.xlsx.fast_scan import fast_scan_xlsx
-from .analyzers.rtf.fast_scan import fast_scan_rtf
-from .analyzers.html.fast_scan import fast_scan_html
-from .analyzers.ole.fast_scan import fast_scan_ole, _CFB_MAGIC
 from .analyzers.csv.fast_scan import fast_scan_csv
-from .analyzers.odf.fast_scan import fast_scan_odf
-from .analyzers.pdf.parser import parse_pdf, ParsedDocument
-from .analyzers.docx.parser import parse_docx
-from .analyzers.pptx.parser import parse_pptx
-from .analyzers.xlsx.parser import parse_xlsx
-from .analyzers.rtf.parser import parse_rtf
-from .analyzers.html.parser import parse_html
-from .analyzers.ole.parser import parse_ole
 from .analyzers.csv.parser import parse_csv
+from .analyzers.docx.external_refs import detect_docx_external_refs
+from .analyzers.docx.fast_scan import fast_scan_docx
+from .analyzers.docx.macros import detect_docx_macros
+from .analyzers.docx.ole import detect_docx_ole_objects
+from .analyzers.docx.parser import parse_docx
+from .analyzers.html.fast_scan import fast_scan_html
+from .analyzers.html.parser import parse_html
+from .analyzers.odf.fast_scan import fast_scan_odf
 from .analyzers.odf.parser import parse_odf
+from .analyzers.ole.fast_scan import _CFB_MAGIC, fast_scan_ole
+from .analyzers.ole.parser import parse_ole
 
 # format checks
 from .analyzers.pdf.active_content import detect_pdf_active_content
+from .analyzers.pdf.fast_scan import fast_scan_pdf
 from .analyzers.pdf.obfuscation import detect_pdf_obfuscation
-from .analyzers.docx.external_refs import detect_docx_external_refs
-from .analyzers.docx.ole import detect_docx_ole_objects
-from .analyzers.docx.macros import detect_docx_macros
+from .analyzers.pdf.parser import ParsedDocument, parse_pdf
 from .analyzers.pptx.external_refs import detect_pptx_external_refs
+from .analyzers.pptx.fast_scan import fast_scan_pptx
 from .analyzers.pptx.macros import detect_pptx_macros
+from .analyzers.pptx.parser import parse_pptx
+from .analyzers.rtf.fast_scan import fast_scan_rtf
+from .analyzers.rtf.parser import parse_rtf
 from .analyzers.xlsx.external_refs import detect_xlsx_external_refs
+from .analyzers.xlsx.fast_scan import fast_scan_xlsx
 from .analyzers.xlsx.macros import detect_xlsx_macros
-from .detectors.embedded_payload import EmbeddedPayloadDetector
-from .detectors.dos_pdf import PdfDoSDetector
-from .detectors.metadata_injection import MetadataInjectionDetector
-from .detectors.ats_manipulation import ATSManipulationDetector
-from .detectors.prompt_injection import PromptInjectionDetector
-from .detectors.ranking_manipulation import RankingManipulationDetector
-from .detectors.yara import YaraDetector
-from .detectors.text_obfuscation import TextObfuscationDetector
-from .detectors.hidden_text import HiddenTextDetector
-
-from .detectors.advanced_prompt_injection import AdvancedPromptInjectionDetector
+from .analyzers.xlsx.parser import parse_xlsx
+from .capabilities import build_coverage_report
+from .config import ScanConfig
 from .detectors.advanced_ats_manipulation import AdvancedATSNLPDetector
+from .detectors.advanced_prompt_injection import AdvancedPromptInjectionDetector
+from .detectors.ats_manipulation import ATSManipulationDetector
 from .detectors.credential_leakage import CredentialLeakageDetector
-from .detectors.injection_nn import InjectionNNDetector
-from .detectors.steganography import SteganographyDetector
-from .detectors.ocr_injection import OCRInjectionDetector
+from .detectors.dos_pdf import PdfDoSDetector
+from .detectors.embedded_payload import EmbeddedPayloadDetector
+from .detectors.evidence_contract import apply_evidence_contract
+from .detectors.explanations import enrich_findings
+from .detectors.hidden_text import HiddenTextDetector
+from .detectors.image_text_ratio import ImageTextRatioDetector
 from .detectors.indirect_injection import IndirectInjectionDetector
-from .detectors.rag_poisoning import RAGPoisoningDetector
-from .detectors.social_engineering import SocialEngineeringDetector
-from .detectors.pii import PiiDetector
+from .detectors.injection_classifier import InjectionClassifierDetector
+from .detectors.injection_nn import InjectionNNDetector
 from .detectors.injection_perplexity import InjectionPerplexityDetector
 from .detectors.media_metadata import MediaMetadataDetector
-
+from .detectors.metadata_injection import MetadataInjectionDetector
+from .detectors.multilingual_injection import MultilingualInjectionDetector
+from .detectors.multilingual_threats import MultilingualThreatDetector
+from .detectors.ocr_injection import OCRInjectionDetector
+from .detectors.pii import PiiDetector
+from .detectors.prompt_injection import PromptInjectionDetector
+from .detectors.rag_poisoning import RAGPoisoningDetector
+from .detectors.ranking_manipulation import RankingManipulationDetector
+from .detectors.script_mixing import ScriptMixingDetector
+from .detectors.social_engineering import SocialEngineeringDetector
+from .detectors.steganography import SteganographyDetector
+from .detectors.text_obfuscation import TextObfuscationDetector
+from .detectors.yara import YaraDetector
+from .enums import Severity, ThreatID, Verdict, VerdictClass
+from .logger import get_logger
+from .policy import Policy, PolicyEngine
+from .report import Finding, ScanReport
+from .risk_model import RiskModel
 from .utils.circuit_breaker import CircuitBreaker, CircuitOpenError
 from .utils.hashing import sha256_file
 from .utils.mime import guess_file_type, is_macro_template
 from .utils.timeouts import Timer
-from .logger import get_logger
 
 logger = get_logger()
 
@@ -152,6 +156,102 @@ def _detect_file_type_by_magic(path: str) -> str:
     return "unknown"
 
 
+_OOXML_DOC_TYPES = {"docx", "xlsx", "pptx"}
+_OLE_TYPES = {"ole", "ole.doc", "ole.xls", "ole.ppt"}
+
+
+def _parse_unknown_text(file_path: str, ftype: str, config: ScanConfig) -> ParsedDocument:
+    """Parse an unknown-type file as plain text when it reads as text.
+
+    Plain-text files (``.txt`` / ``.md`` / ``.json`` / ``.log`` / source code)
+    have no magic bytes, so the type resolver returns ``unknown`` — and the deep
+    scan previously parsed them to EMPTY text, so an injection sitting in a
+    ``.txt`` (the single most common RAG ingestion format) was never scanned.
+    This reads the content so the always-on text detectors (prompt injection,
+    multilingual, script-mixing, …) run on it. Binary content yields empty text,
+    preserving the previous behaviour for non-text unknowns. Never raises.
+    """
+    if not getattr(config, "enable_plaintext_scan", True):
+        return ParsedDocument(file_path=file_path, file_type=ftype, text="", metadata={})
+    try:
+        cap = config.limits.max_mb * 1024 * 1024
+        with open(file_path, "rb") as f:
+            raw = f.read(cap)
+    except Exception:
+        return ParsedDocument(file_path=file_path, file_type=ftype, text="", metadata={})
+    if not raw:
+        return ParsedDocument(file_path=file_path, file_type=ftype, text="", metadata={})
+    text = raw.decode("utf-8", errors="replace")
+    # Reject binary: prose of any language carries almost no C0/C1 control
+    # characters or U+FFFD replacement marks; a binary blob is dense with them.
+    sample = text[:8192]
+    noise = sum(
+        1 for c in sample
+        if (ord(c) < 0x20 and c not in "\t\n\r") or ord(c) == 0xFFFD
+        or 0x7F <= ord(c) <= 0x9F
+    )
+    if sample and noise / len(sample) > 0.05:
+        return ParsedDocument(file_path=file_path, file_type=ftype, text="", metadata={})
+    return ParsedDocument(file_path=file_path, file_type="text", text=text, metadata={})
+
+
+def _format_masquerade_finding(claimed: str, actual: str) -> Optional[Finding]:
+    """Raise a T3 masquerade finding when an Office-document extension
+    disagrees with the file's real format. ``claimed`` is the type implied by
+    the extension; ``actual`` is what the magic bytes / container say.
+
+    Caught patterns (benign documents never do these):
+      • OOXML extension (.docx/.xlsx/.pptx) but OLE2 content — a legacy binary
+        (often macro-laden) renamed to look like a safe modern document.
+      • Word/PowerPoint OOXML extension but a valid ZIP with no document body
+        (a hollow / malformed OOXML package).
+      • A legacy-Office extension (.doc/.xls/.ppt) but OOXML/zip content.
+
+    Excluded: ``.xlsx`` ↔ ``zip`` — a binary workbook (.xlsb) is a legitimate
+    ZIP without ``xl/workbook.xml`` and would classify as ``zip``.
+    """
+    if claimed == actual:
+        return None
+    claimed_ooxml = claimed in _OOXML_DOC_TYPES
+    claimed_ole = claimed in _OLE_TYPES
+    dangerous = False
+    if claimed_ooxml and actual in _OLE_TYPES:
+        dangerous = True  # OOXML ext, OLE content — the classic masquerade
+    elif claimed in {"docx", "pptx"} and actual == "zip":
+        dangerous = True  # hollow OOXML word/ppt (no benign binary variant)
+    elif claimed_ole and (actual in _OOXML_DOC_TYPES or actual == "zip"):
+        dangerous = True  # legacy ext, OOXML content
+    if not dangerous:
+        return None
+    return Finding(
+        threat_id=ThreatID.T3_OBFUSCATION,
+        severity=Severity.MEDIUM,
+        title="File-type masquerade (extension does not match content)",
+        explain=(
+            f"This file's name implies a '{claimed}' document, but its actual "
+            f"content is '{actual}'. A document whose extension disagrees with "
+            "its real format is a common evasion — e.g. a legacy macro-enabled "
+            ".doc renamed .docx to slip past filters that trust the extension, "
+            "or a structurally hollow Office package. Legitimate documents do "
+            "not do this."
+        ),
+        evidence={
+            "subtype": "extension_content_mismatch",
+            "claimed_type": claimed,
+            "actual_type": actual,
+            "malicious_text": f"extension claims '{claimed}', content is '{actual}'",
+        },
+        module="format_integrity",
+        confidence=0.8,
+        mitre_technique="T1036",  # Masquerading
+        attack_objective=(
+            "Disguise a malicious or legacy-macro document as a safe modern "
+            "format to evade extension-based filtering"
+        ),
+        verdict_class=VerdictClass.REVIEW,
+    )
+
+
 class Scanner:
     def __init__(
         self,
@@ -202,6 +302,11 @@ class Scanner:
             PiiDetector(),
             InjectionPerplexityDetector(),
             MediaMetadataDetector(),
+            ScriptMixingDetector(),
+            MultilingualInjectionDetector(),
+            MultilingualThreatDetector(),
+            InjectionClassifierDetector(),
+            ImageTextRatioDetector(),
         ]
 
         # G.4: eagerly build expensive per-config detector state (compiled
@@ -236,6 +341,12 @@ class Scanner:
         # is running with no active detection for an ML-dependent threat
         # (T1 malware signatures / T4 semantic-OCR-BERT injection). A
         # security scanner must not silently under-deliver on its promises.
+        # W7 (0.5.0): opt-in content-hash result cache (RAG re-ingestion).
+        from collections import OrderedDict
+        self._result_cache: Optional["OrderedDict[str, ScanReport]"] = (
+            OrderedDict() if getattr(self.config, "enable_result_cache", False) else None
+        )
+
         self._coverage = build_coverage_report(self.config)
         if self._coverage.degraded:
             logger.warning(
@@ -417,11 +528,28 @@ class Scanner:
           warn  → REVIEW (FLAG; the default)
           block → BLOCK (fail closed)
         """
+        # W6 (0.5.0): if an encrypted PDF was transparently decrypted and its
+        # content WAS scanned, it is no longer a blind spot — downgrade the
+        # encryption finding to INFO and note the method, regardless of the
+        # unscannable policy (the policy is about content we *couldn't* read).
+        decrypted = report.metadata.get("pdf_decrypted")
         policy = getattr(self.config, "on_unscannable_verdict", "warn")
-        if policy == "warn":
+        if not decrypted and policy == "warn":
             return  # default REVIEW class already FLAGs
         for f in report.findings:
             if (f.evidence or {}).get("subtype") != "encrypted_unscannable":
+                continue
+            if decrypted:
+                f.verdict_class = VerdictClass.INFO
+                f.severity = Severity.LOW
+                f.title = "PDF was encrypted but decrypted and scanned"
+                f.explain = (
+                    "The PDF was encrypted but the scanner decrypted it "
+                    f"({decrypted}) and scanned the full content — no longer "
+                    "an un-inspectable blind spot."
+                )
+                f.evidence["decrypted"] = decrypted
+                f.evidence.pop("evidence_unavailable_reason", None)
                 continue
             if policy == "block":
                 f.verdict_class = VerdictClass.BLOCK
@@ -502,12 +630,18 @@ class Scanner:
             # Determine file type by extension, then verify with magic bytes
             ftype = guess_file_type(file_path)
             magic_type = _detect_file_type_by_magic(file_path)
+            type_masquerade: Optional[tuple[str, str]] = None
             if ftype != "unknown" and magic_type != "unknown" and ftype != magic_type:
                 logger.warning(
                     "Extension/magic-byte mismatch",
                     extension_type=ftype,
                     magic_type=magic_type,
                 )
+                # An Office document whose extension disagrees with its real
+                # format is a filter-evasion masquerade (e.g. a legacy macro
+                # .doc renamed .docx, or a structurally hollow OOXML package).
+                # Capture it so a finding can be raised after the report exists.
+                type_masquerade = (ftype, magic_type)
                 ftype = magic_type  # Trust magic bytes over extension
             elif ftype == "unknown" and magic_type != "unknown":
                 ftype = magic_type
@@ -538,6 +672,16 @@ class Scanner:
 
         if effective_policy is not None:
             report.metadata["policy"] = effective_policy.name
+
+        # File-type masquerade: the extension claims an Office document but the
+        # bytes are a different (legacy-binary / hollow-OOXML) format. Real
+        # documents never do this; it is a classic filter-evasion (deliver a
+        # macro-laden .doc while it looks like a safe modern .docx). Benign
+        # .xlsb (a valid ZIP without xl/workbook.xml) is excluded.
+        if type_masquerade is not None:
+            masq = _format_masquerade_finding(*type_masquerade)
+            if masq is not None:
+                report.add(masq)
 
         # Deny list — instant BLOCK without scanning
         if effective_policy and sha.lower() in effective_policy.deny_hashes:
@@ -655,8 +799,9 @@ class Scanner:
 
                 # 4. Macro-enabled template extension — elevated scrutiny (item 0.12)
                 if self.config.enable_active_content_checks and is_macro_template(file_path):
+                    from .enums import Severity as _Sev
+                    from .enums import ThreatID as _TID
                     from .report import Finding as _Finding
-                    from .enums import ThreatID as _TID, Severity as _Sev
                     findings.append(_Finding(
                         threat_id=_TID.T2_ACTIVE_CONTENT,
                         severity=_Sev.MEDIUM,
@@ -736,7 +881,11 @@ class Scanner:
 
         # Determine Deep Scan
         should_deep_scan = False
-        if fast_score >= self.config.thresholds.deep_scan_trigger:
+        if getattr(self.config, "fast_only", False):
+            # W7 (0.5.0): high-throughput mode — fast byte-level scan only.
+            should_deep_scan = False
+            report.metadata["fast_only"] = True
+        elif fast_score >= self.config.thresholds.deep_scan_trigger:
             should_deep_scan = True
         elif ftype == "unknown" and size_mb < self.config.limits.max_mb:
             should_deep_scan = True
@@ -801,9 +950,7 @@ class Scanner:
                         self.config, "enable_odf", True
                     ):
                         return parse_odf(file_path, self.config)
-                    return ParsedDocument(
-                        file_path=file_path, file_type=ftype, text="", metadata={}
-                    )
+                    return _parse_unknown_text(file_path, ftype, self.config)
 
                 parsed_doc = await asyncio.wait_for(
                     loop.run_in_executor(self._executor, _parse_task),
@@ -884,6 +1031,27 @@ class Scanner:
                 except Exception as e:
                     log_ctx.error("Format checks failed", error=str(e))
             report.timings_ms["format_checks"] = t.duration_ms
+
+            # W2 (0.5.0): bridge hidden text discovered by the fast scan
+            # (which only emits Finding objects) into the parsed doc, so the
+            # deep-scan ScriptMixingDetector can compare each hidden run's
+            # Unicode script against the document body uniformly across
+            # formats (docx hidden text otherwise never reaches the doc).
+            if parsed_doc is not None:
+                _fast_hidden = [
+                    f.evidence["hidden_text"]
+                    for f in report.findings
+                    if isinstance((f.evidence or {}).get("hidden_text"), str)
+                    and f.evidence["hidden_text"].strip()
+                ]
+                if _fast_hidden:
+                    parsed_doc.metadata["_fast_hidden_text"] = _fast_hidden
+
+                # W6 (0.5.0): surface whether an encrypted PDF was decrypted
+                # so the unscannable policy can downgrade the blind-spot
+                # finding (the content was actually scanned).
+                if parsed_doc.metadata.get("pdf_decrypted"):
+                    report.metadata["pdf_decrypted"] = parsed_doc.metadata["pdf_decrypted"]
 
             # 2c. Detectors
             with Timer() as t:
@@ -1051,6 +1219,22 @@ class Scanner:
 
     def scan(self, file_path: str, policy_name: Optional[str] = None) -> ScanReport:
         """Synchronous wrapper (blocking). Uses asyncio.run() for safety."""
+        # W7 (0.5.0): content-hash result cache. Identical content (any path)
+        # returns the cached verdict without re-scanning — for pipelines that
+        # re-ingest the same documents. Only when no per-call policy is given
+        # (a policy can change the result).
+        cache = self._result_cache
+        cache_key = None
+        if cache is not None and policy_name is None:
+            try:
+                cache_key = sha256_file(file_path)
+            except Exception:
+                cache_key = None
+            if cache_key is not None and cache_key in cache:
+                cache.move_to_end(cache_key)
+                import dataclasses
+                return dataclasses.replace(cache[cache_key], file_path=file_path)
+
         try:
             asyncio.get_running_loop()
             is_running = True
@@ -1064,12 +1248,44 @@ class Scanner:
                 future = pool.submit(
                     asyncio.run, self.scan_async(file_path, policy_name=policy_name)
                 )
-                return future.result()
+                report = future.result()
         else:
-            return asyncio.run(self.scan_async(file_path, policy_name=policy_name))
+            report = asyncio.run(self.scan_async(file_path, policy_name=policy_name))
+
+        if cache is not None and cache_key is not None:
+            cache[cache_key] = report
+            while len(cache) > self.config.result_cache_size:
+                cache.popitem(last=False)
+        return report
 
     # Alias for backward compatibility with CLI and external callers
     scan_sync = scan
+
+    def sanitize(self, file_path: str, output_path: Optional[str] = None):
+        """W3 (0.5.0): produce a cleaned copy safe for LLM/RAG ingestion.
+
+        Strips hidden/invisible text, dangerous metadata, active content and
+        located injections while preserving the visible document. Returns a
+        ``SanitizationResult`` with the cleaned-copy path and an auditable
+        list of what was removed; for formats without a sanitizer (or when
+        ``config.enable_sanitization`` is False), ``sanitized=False`` so the
+        caller can fall back to BLOCK.
+
+        The original file is never modified. ``output_path`` chooses where the
+        cleaned copy is written (default: a temp file the caller owns and
+        should delete after ingesting). Which categories are stripped is
+        controlled by ``config.sanitize_remove_categories``.
+        """
+        from .sanitize import sanitize_file
+
+        ftype = _detect_file_type_by_magic(file_path)
+        # Normalise magic identifiers (ole.doc, odf.text, …) to a base type
+        # the sanitizer dispatch understands; fall back to the extension.
+        base = ftype.split(".")[0]
+        if base in ("zip", "unknown"):
+            ext = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else ""
+            base = ext or base
+        return sanitize_file(file_path, base, self.config, output_path)
 
 
 def scan(

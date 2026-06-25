@@ -146,6 +146,15 @@ class ScanConfig(BaseSettings):
             "deep-scan pipeline on extracted cell text."
         ),
     )
+    enable_plaintext_scan: bool = Field(
+        True,
+        description=(
+            "Scan plain-text files with no magic bytes (.txt/.md/.json/.log/"
+            "source code) as text so the content detectors (prompt injection, "
+            "multilingual, script-mixing) run on them. Binary unknowns stay "
+            "empty. Plain text is the most common RAG ingestion format."
+        ),
+    )
     enable_odf: bool = Field(
         True,
         description=(
@@ -181,6 +190,47 @@ class ScanConfig(BaseSettings):
             "(encrypted PDF/Office/archive): warn → FLAG, block → BLOCK, "
             "allow → INFO. Default warn surfaces the blind spot without "
             "blocking."
+        ),
+    )
+    # W6 (0.5.0): transparently decrypt encrypted PDFs before scanning so the
+    # content can actually be inspected instead of flagged as a blind spot.
+    # Handles the common empty-user-password (permissions-only) case with no
+    # password; real password-protected PDFs use pdf_passwords. Requires the
+    # optional 'pikepdf' package (pip install doc-firewall[crypto]); a no-op
+    # when absent. Decryption is to a temp file scanned then deleted.
+    enable_pdf_decryption: bool = Field(
+        True,
+        description=(
+            "Try to decrypt encrypted PDFs (empty + supplied passwords) so "
+            "content can be scanned. Requires optional 'pikepdf'."
+        ),
+    )
+    pdf_passwords: List[str] = Field(
+        default_factory=list,
+        description="Candidate user passwords to try when decrypting PDFs.",
+    )
+
+    # W3 (0.5.0): sanitization. sanitize() never runs during scan() and
+    # never touches the original file — it writes a cleaned copy. These flags
+    # let a user disable it entirely or restrict which categories are
+    # stripped. Categories: hidden_text, metadata, macro, active_content,
+    # embedded_file, formula_injection.
+    enable_sanitization: bool = Field(
+        True,
+        description=(
+            "Master switch for Scanner.sanitize(). When False, sanitize() "
+            "returns sanitized=False (no cleaned copy is produced)."
+        ),
+    )
+    sanitize_remove_categories: List[str] = Field(
+        default_factory=lambda: [
+            "hidden_text", "metadata", "macro", "active_content",
+            "embedded_file", "formula_injection",
+        ],
+        description=(
+            "Which categories the sanitizers strip. Remove an entry to keep "
+            "that category in the cleaned copy (e.g. drop 'metadata' to "
+            "preserve document properties)."
         ),
     )
 
@@ -251,6 +301,73 @@ class ScanConfig(BaseSettings):
     )
     enable_metadata_checks: bool = Field(True, description="Detect metadata injection (T8)")
     enable_ats_manipulation_checks: bool = Field(True, description="Detect ATS keyword stuffing (T9)")
+    # W2 (0.5.0): language-agnostic script-mixing. Flags hidden-text runs and
+    # metadata values whose Unicode script differs from the document's
+    # dominant script (e.g. a hidden CJK instruction in a Latin résumé) —
+    # catches non-English injection in languages we ship no patterns for.
+    # Default ON: cheap, dependency-free, high precision (only hidden /
+    # metadata content is checked, so visibly multilingual docs don't FP).
+    enable_script_mixing: bool = Field(
+        True,
+        description="Flag hidden/metadata text in a non-dominant Unicode script (T4/T3)",
+    )
+    # W1.1 (0.5.0): always-on multilingual injection-phrase matching (15
+    # languages) over body + metadata. No ML extras required. Closes the
+    # default-install gap where non-English injection was undetected.
+    enable_multilingual_injection: bool = Field(
+        True,
+        description="Match non-English prompt-injection phrases in 15 languages (T4)",
+    )
+    # W6 (0.5.0): always-on multilingual RAG-poisoning (T11) + social-
+    # engineering (T12) keyword layer over body + metadata. Conservative
+    # MEDIUM/REVIEW findings; extends the English-only regex detectors to
+    # non-English documents. No ML extras required.
+    enable_multilingual_threats: bool = Field(
+        True,
+        description="Match non-English RAG-poisoning & social-engineering lures (T11/T12)",
+    )
+    # W2 (0.5.0): bundled ML injection classifier. Default-on, numpy-only,
+    # ships in the wheel (no model download). Generalises to paraphrased
+    # injections the keyword layers miss. REVIEW-class (can FLAG, not BLOCK
+    # alone). Auto-disables if the vendored model is absent.
+    enable_injection_classifier: bool = Field(
+        True,
+        description="Bundled ML classifier for paraphrased/novel prompt injection (T4)",
+    )
+    # W4 (0.5.0): language-agnostic image-based-injection advisory. A document
+    # that is image-heavy with little extractable text may hide instructions
+    # in a screenshot/scan that only OCR can read — a blind spot when OCR is
+    # off. Flags it for review (no OCR required). Suppressed when OCR is on.
+    enable_image_text_ratio: bool = Field(
+        True,
+        description="Flag image-heavy / low-text documents for OCR review (T3)",
+    )
+    # W5 (0.5.0): measured font/ToUnicode divergence — rendered text (glyph
+    # names) vs extracted text (ToUnicode CMap). Flags a confirmed mismatch
+    # (visible ≠ extracted) as HIGH; benign embedded fonts don't trip it.
+    enable_font_divergence: bool = Field(
+        True,
+        description="Detect PDF font/ToUnicode rendered-vs-extracted divergence (T3)",
+    )
+    # W7 (0.5.0): opt-in in-memory result cache keyed by file SHA-256, for
+    # high-throughput pipelines that re-ingest identical documents (RAG).
+    # Off by default to avoid unbounded memory; bounded LRU when on.
+    enable_result_cache: bool = Field(
+        False,
+        description="Cache scan results by file content hash (RAG re-ingestion)",
+    )
+    result_cache_size: int = Field(
+        1024, description="Max entries in the content-hash result cache"
+    )
+    # W7 (0.5.0): fast-only mode — run ONLY the byte-level fast scan, skip the
+    # deep parse (Docling) + detector loop. Sub-100ms; for high-throughput
+    # pre-filtering / triage where you accept lower recall (active-content,
+    # embedded payloads, DoS, and raw-byte injection tokens still fire; deep
+    # text/ML detection does not). Off by default.
+    fast_only: bool = Field(
+        False,
+        description="Skip deep parse + detectors; byte-level fast scan only (high throughput)",
+    )
 
     enable_advanced_ahocorasick: bool = Field(
         False, description="Enable Aho-Corasick multi-phrase injection matcher (Layer 1 ML)"
@@ -380,7 +497,15 @@ class ScanConfig(BaseSettings):
         False, description="Enable semantic nearest-neighbour injection detector (Layer 4 ML)"
     )
     nn_model_name: str = Field(
-        "all-MiniLM-L6-v2", description="sentence-transformers model for semantic NN layer"
+        "all-MiniLM-L6-v2",
+        description=(
+            "sentence-transformers model for the semantic NN layer. The "
+            "default 'all-MiniLM-L6-v2' is ENGLISH-ONLY — for cross-lingual "
+            "injection matching set this to a multilingual model such as "
+            "'paraphrase-multilingual-MiniLM-L12-v2' or 'LaBSE' (the strict "
+            "profile does this automatically). The coverage report's "
+            "`languages` axis reflects which model is active."
+        ),
     )
     nn_sim_threshold: float = Field(
         0.72, description="Cosine similarity threshold for semantic NN injection detection"
@@ -588,6 +713,16 @@ class ScanConfig(BaseSettings):
                 (r"\brespond\s+to\s+(?:all\s+|every\s+)?requests?\s+without\s+(?:any\s+)?(?:restrictions?|limitations?|filters?|constraints?|policies?)\b", 2.0),
                 (r"\b(?:previous|prior)\s+instructions?\s+(?:were|are)\s+(?:a\s+)?(?:test|false|wrong|fake|null|void|invalid|untrue)\b", 2.0),
                 (r"\byour\s+real\s+instructions?\s+(?:are|is|were)\b", 2.0),
+                # CV / resume evaluation-injection (CIC-Trap4Phish class): a
+                # candidate embeds instructions to bias an AI screener. The
+                # meta-references to the "prompt" itself never occur in a benign
+                # document, so they carry full weight; the evaluation-biasing and
+                # cross-prompt-persistence phrasings corroborate.
+                (r"\btake\s+into\s+account\s+(?:any\s+|the\s+)?(?:previous|prior)\s+prompt", 2.0),
+                (r"\bif\s+in\s+(?:a\s+|the\s+)?next\s+prompt\b", 2.0),
+                (r"\b(?:answer|respond)(?:\s+it)?\s+with\s+these\s+additional\s+constraints?\b", 1.5),
+                (r"\bgive\s+(?:an?\s+)?(?:extremely|exceptionally|highly)\s+(?:positive|negative)\s+evaluation\b", 1.5),
+                (r"\bhighlight(?:ing)?\s+(?:as\s+many\s+)?(?:positive|negative)\s+(?:points?|aspects?)\b", 1.0),
             ],
             "secrecy": [
                 (
@@ -830,6 +965,13 @@ class ScanConfig(BaseSettings):
             self.enable_advanced_bert = True
             self.enable_steganography_checks = True
             self.enable_credential_entropy = True
+            self.enable_semantic_nn = True
+            # W1.2 (0.5.0): strict aims for maximum recall, including
+            # cross-lingual — use a multilingual embedding model so the
+            # semantic NN layer's 22-language seeds match non-English text.
+            # (Only override the English default; respect an explicit choice.)
+            if self.nn_model_name == "all-MiniLM-L6-v2":
+                self.nn_model_name = "paraphrase-multilingual-MiniLM-L12-v2"
         elif self.profile == "lenient":
             self.thresholds.deep_scan_trigger = 0.40
             self.thresholds.flag = 0.35

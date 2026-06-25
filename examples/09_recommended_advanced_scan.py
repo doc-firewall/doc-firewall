@@ -8,9 +8,7 @@ This example shows the recommended configuration for the highest security in Doc
 """
 
 import os
-import sys
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 from doc_firewall import ScanConfig, Scanner
 
 

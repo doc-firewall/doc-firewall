@@ -5,12 +5,10 @@ This example demonstrates how to convert the scan report into a dictionary/JSON
 format, which is useful for building APIs, logging, or sending results to a frontend.
 """
 
-import sys
 import os
 import json
 from datetime import datetime
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
 from doc_firewall import scan
 

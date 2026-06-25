@@ -72,7 +72,57 @@ Required only if `enable_antivirus=True` with `provider="clamav"`.
 
 DocFirewall uses [Docling](https://github.com/DS4SD/docling) for full document parsing (text, layout, metadata extraction). It installs automatically as a dependency.
 
-OCR is disabled by default — DocFirewall reads the native text layer of PDFs directly. If you see a `"No OCR engine found"` warning in logs, it can be safely ignored; it has no effect on scan accuracy.
+OCR is **disabled by default** — DocFirewall reads the native text layer of PDFs and Office files directly, which covers the vast majority of documents. OCR is only needed to read text that is *rendered inside an image* (a screenshot of text, text baked into a logo, or a QR code). See **Tesseract OCR** below.
+
+### Tesseract OCR (optional — image-based injection & quishing)
+
+Required only when you enable image inspection:
+
+```python
+config = ScanConfig(enable_ocr_injection_scan=True)   # OCR text inside images
+config = ScanConfig(enable_qr_decode=True)            # decode QR / barcodes
+```
+
+`pip install "doc-firewall[ml]"` installs the Python wrapper **`pytesseract`** and **`Pillow`**, but it **cannot** install the Tesseract engine itself — Tesseract is a native (C++) binary, and PyPI packages cannot bundle OS executables. You must install it with your platform's package manager:
+
+=== "macOS"
+    ```bash
+    brew install tesseract
+    ```
+
+=== "Ubuntu / Debian"
+    ```bash
+    sudo apt-get update && sudo apt-get install tesseract-ocr
+    ```
+
+=== "Fedora / RHEL"
+    ```bash
+    sudo dnf install tesseract
+    ```
+
+=== "Windows"
+    ```powershell
+    choco install tesseract
+    # or download the installer from https://github.com/UB-Mannheim/tesseract/wiki
+    # then ensure tesseract.exe is on your PATH
+    ```
+
+Verify the engine is visible:
+
+```bash
+tesseract --version
+```
+
+**What does NOT work if you skip the Tesseract binary:**
+
+- **Image-based prompt injection is not inspected.** Instructions rendered inside an image (a screenshot of text, text in a banner/logo) are invisible to a text scanner. This is the exact vector the OCR layer exists to catch.
+- **QR / barcode "quishing" detection (T10/T7) is inactive** even with `enable_qr_decode=True` — `pyzbar` also needs its native `zbar` library.
+- **Image-only / scanned PDFs are flagged as an uninspected blind spot.** When `enable_ocr_injection_scan` is *off*, a document that is image-heavy with little extractable text raises a **T3 advisory** ("image-heavy document with little extractable text" → REVIEW) so a clean verdict is never silently assumed over un-inspectable content. Installing Tesseract **and** setting `enable_ocr_injection_scan=True` both inspects the images and auto-suppresses that advisory.
+
+!!! warning "Do not set the flag without the binary"
+    Setting `enable_ocr_injection_scan=True` while the Tesseract binary is missing will **suppress the blind-spot advisory without actually inspecting the images** — turning a visible "couldn't read this" warning into a silent gap. Install the binary first, or leave the flag off so the advisory keeps surfacing image-only documents for review.
+
+If you have no need to read text inside images, it is safe to skip Tesseract entirely — every other detector (structural, JavaScript, metadata, the bundled ML injection classifier, multilingual layers) runs without it, and the coverage report will mark OCR as an inactive capability.
 
 ### YARA (built-in ruleset)
 

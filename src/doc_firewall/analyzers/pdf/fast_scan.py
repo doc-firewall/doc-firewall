@@ -1,14 +1,17 @@
 from __future__ import annotations
+
+import math
 import os
 import re
-import math
 import zlib
 from typing import List
-from ...enums import ThreatID, Severity, VerdictClass
-from ...report import Finding
+
 from ...config import ScanConfig
+from ...enums import Severity, ThreatID, VerdictClass
 from ...logger import get_logger
+from ...report import Finding
 from .action_resolver import resolve_pdf_actions, summarize_actions
+from .js_risk import benign_js_only
 from .uri_classify import classify_pdf_uris
 
 logger = get_logger()
@@ -463,7 +466,6 @@ def fast_scan_pdf(file_path: str, config: ScanConfig) -> List[Finding]:
     # then re-scan for active-content tokens that evade exact byte matching.
     processed = _preprocess_pdf_bytes(data)
     if processed != data:
-        data_lower_proc = processed.lower()
         for token in SUSPICIOUS_TOKENS:
             if token in processed and token not in data:
                 findings.append(
@@ -1044,5 +1046,38 @@ def fast_scan_pdf(file_path: str, config: ScanConfig) -> List[Finding]:
                 module="fast_scan.pdf.obfuscation",
             )
         )
+
+    # JavaScript risk tiering: the mere presence of /JavaScript is ubiquitous in
+    # benign AcroForm/government PDFs (field calc/format + viewer checks). When
+    # the document's resolved JavaScript (incl. compressed/ObjStm-packed) uses
+    # only benign form/viewer APIs and the document has no dangerous non-JS
+    # action token, demote the JS-and-trigger active-content findings to INFO so
+    # they no longer drive a verdict. Dangerous JS (js_risk="dangerous"),
+    # unreadable JS ("unverified") and the suspicious-URI BLOCK finding stay
+    # flagged. Recall is preserved — the adversarial benchmark is unchanged.
+    if benign_js_only(data):
+        _JS_TRIGGER_TOKENS = {"/JavaScript", "/JS", "/AA", "/OpenAction"}
+        for f in findings:
+            if f.threat_id != ThreatID.T2_ACTIVE_CONTENT:
+                continue
+            if f.verdict_class == VerdictClass.BLOCK:
+                continue
+            ev = f.evidence or {}
+            if (
+                ev.get("token") in _JS_TRIGGER_TOKENS
+                or f.module == "fast_scan.pdf.annots"
+                or "javascript" in str(ev.get("malicious_text", "")).lower()
+            ):
+                f.severity = Severity.LOW
+                f.verdict_class = VerdictClass.INFO
+                ev["js_risk"] = "benign"
+                f.evidence = ev
+                f.explain = (
+                    "Document JavaScript was resolved and uses only benign "
+                    "form/viewer APIs (field calculation/formatting, viewer "
+                    "checks) with no code-execution, network or data-exfiltration "
+                    "primitive, and no dangerous non-JS action is present. "
+                    "Recorded for audit — not a verdict driver."
+                )
 
     return findings

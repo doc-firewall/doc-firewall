@@ -8,6 +8,7 @@ import csv
 import enum
 import json
 import shutil
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -295,6 +296,28 @@ def scan_file(scanner: Any, file_path: Path, base_dir: Path, scan_mode: str) -> 
         ]
 
 
+# --- Parallel scanning (opt-in via --workers) ----------------------------
+# Processes, not threads: scanning is CPU-bound and the Docling PDF worker is
+# serialized by a lock, so only separate processes give real parallelism.
+# Each worker builds its OWN Scanner ONCE and reuses it across files. Memory
+# scales with --workers (each process loads its own models), so size to taste.
+_WORKER_SCANNER: Any = None
+_WORKER_BASE: "Path | None" = None
+_WORKER_MODE: str = "standard"
+
+
+def _init_worker(profile: str, mode: str, enable_pii: bool, base_str: str) -> None:
+    global _WORKER_SCANNER, _WORKER_BASE, _WORKER_MODE
+    from doc_firewall import ScanConfig, Scanner
+    _WORKER_SCANNER = Scanner(build_scan_config(ScanConfig, profile, mode, enable_pii))
+    _WORKER_BASE = Path(base_str)
+    _WORKER_MODE = mode
+
+
+def _scan_task(file_path_str: str) -> "tuple[str, tuple[dict[str, Any], list[dict[str, Any]]]]":
+    return file_path_str, scan_file(_WORKER_SCANNER, Path(file_path_str), _WORKER_BASE, _WORKER_MODE)
+
+
 def write_reports(rows: list[dict[str, Any]], json_reports: list[dict[str, Any]], output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     csv_path = output_dir / "folder_scan_report.csv"
@@ -330,6 +353,13 @@ def main() -> int:
         help="Skip the T8 PII detector entirely (no phone/email/SSN/etc. findings). "
         "Useful for resume corpora where PII is expected and not a threat.",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="Parallel worker processes (default: 1 = sequential). Each worker loads its own "
+        "models, so memory scales with this number; only worth raising for large folders.",
+    )
     args = parser.parse_args()
 
     if not args.input_dir.is_dir():
@@ -350,17 +380,36 @@ def main() -> int:
 
     sorted_dir = args.sorted_dir or (args.out / "sorted")
 
-    scanner = Scanner(config)
     rows: list[dict[str, Any]] = []
     json_reports: list[dict[str, Any]] = []
     bucket_counts: dict[str, int] = {}
-    for file_path in iter_files(args.input_dir, exclude_dir=sorted_dir):
-        json_payload, csv_rows = scan_file(scanner, file_path, args.input_dir, args.mode)
+
+    files = list(iter_files(args.input_dir, exclude_dir=sorted_dir))
+
+    def handle(file_path: Path, json_payload: dict[str, Any], csv_rows: list[dict[str, Any]]) -> None:
+        # File copying / counting stays in the main process; workers only scan.
         json_reports.append(json_payload)
         rows.extend(csv_rows)
-
         bucket = sort_file(file_path, args.input_dir, sorted_dir, json_payload.get("verdict"))
         bucket_counts[bucket] = bucket_counts.get(bucket, 0) + 1
+
+    workers = max(1, args.workers)
+    if workers > 1 and len(files) > 1:
+        workers = min(workers, len(files))
+        print(f"Scanning {len(files)} file(s) with {workers} worker processes…")
+        # pool.map preserves input order, so the CSV/JSON match the sequential run.
+        with ProcessPoolExecutor(
+            max_workers=workers,
+            initializer=_init_worker,
+            initargs=(args.profile, args.mode, args.enable_pii, str(args.input_dir)),
+        ) as pool:
+            for file_path_str, (json_payload, csv_rows) in pool.map(_scan_task, [str(f) for f in files]):
+                handle(Path(file_path_str), json_payload, csv_rows)
+    else:
+        scanner = Scanner(config)
+        for file_path in files:
+            json_payload, csv_rows = scan_file(scanner, file_path, args.input_dir, args.mode)
+            handle(file_path, json_payload, csv_rows)
 
     write_reports(rows, json_reports, args.out)
     if bucket_counts:

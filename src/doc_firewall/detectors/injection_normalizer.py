@@ -226,7 +226,16 @@ def normalize_for_matching(text: str) -> str:
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
 
     # Step 5 — lowercase
-    return cleaned.lower()
+    cleaned = cleaned.lower()
+
+    # Step 6 — W1.1 (0.5.0): final homoglyph fold AFTER lowercasing. The
+    # fold table is keyed on lowercase forms, so an uppercase homoglyph
+    # exposed only by case-folding slips past the earlier folds — e.g.
+    # OHM SIGN U+2126 → NFKC → capital GREEK OMEGA U+03A9 → lower → 'ω',
+    # which only then maps to 'w'. Re-applying here makes the function
+    # idempotent (a one-pass guarantee, so a homoglyph evasion can't survive
+    # a single normalization). Found by the property-based idempotency test.
+    return cleaned.translate(_HOMOGLYPH_TABLE)
 
 
 def has_obfuscation_chars(text: str) -> bool:

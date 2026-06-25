@@ -189,11 +189,14 @@ class ATSManipulationDetector(Detector):
                 top_ratio = top_freq / total
                 ats_kw_set = set(config.ats_keywords)
 
-                # Require a minimum absolute count of 10 to avoid FPs on short
-                # documents where a legitimately repeated domain term (e.g. "data"
-                # in a data-engineering resume or "performance" in a review doc)
-                # hits the 8% ratio purely because the token pool is small.
-                if top_ratio > 0.08 and top_freq >= 10:
+                # Threshold at 15% (not 8%): real topical/technical documents
+                # legitimately peak around 8-12% for their dominant term (a
+                # privacy policy repeating "data", a contract repeating
+                # "agreement"), so an 8% bar false-fired across the benign Word
+                # corpus. Mechanical ATS stuffing concentrates a keyword far
+                # higher; 15% with 12+ occurrences separates the two. Known
+                # attack tokens still fire at the lower 4% bar below.
+                if top_ratio > 0.15 and top_freq >= 12:
                     # Any token over 8% with 10+ occurrences is mechanically
                     # repetitive regardless of whether it is a "known attack phrase".
                     findings.append(

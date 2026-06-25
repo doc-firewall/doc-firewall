@@ -5,7 +5,7 @@ from .base import Detector
 from ..analyzers.base import ParsedDocument
 from ..config import ScanConfig
 from ..report import Finding
-from ..enums import ThreatID, Severity
+from ..enums import ThreatID, Severity, VerdictClass
 
 # D.13: HIPAA Safe Harbor (45 CFR §164.514(b)(2)) defines 18 identifier types.
 # We cover the regex-detectable subset; free-text identifiers (full name,
@@ -175,6 +175,16 @@ class PiiDetector(Detector):
             return []
 
         # D.13: emit T8 (correct mapping) — was T2 placeholder in v1.0.
+        #
+        # PII presence is a privacy / data-governance NOTICE, not evidence that
+        # the document is malicious. Résumés, finance spreadsheets, contracts,
+        # and most real business documents legitimately contain names, emails,
+        # phone numbers, account/card numbers. Driving the threat verdict off
+        # that flags nearly every real document (measured: ~88–100% of benign
+        # spreadsheets and résumés). So this is recorded as INFO-class: fully
+        # reported (severity preserved so the reviewer sees how sensitive it
+        # is), but it does NOT push the verdict to FLAG/BLOCK on its own. A
+        # caller who wants PII to gate can re-weight T8 or escalate it.
         return [
             Finding(
                 threat_id=ThreatID.T8_METADATA_INJECTION,
@@ -184,7 +194,8 @@ class PiiDetector(Detector):
                     f"Document contains {sum(m['count'] for m in matches_by_label.values())} "
                     f"PII match(es) across {len(matches_by_label)} identifier "
                     f"type(s). HIPAA Safe-Harbor identifiers hit: "
-                    f"{sorted(hipaa_hits) or 'none'}."
+                    f"{sorted(hipaa_hits) or 'none'}. This is a privacy notice, "
+                    "not a sign the document is malicious."
                 ),
                 evidence={
                     "subtype": "pii_exposure",
@@ -194,5 +205,6 @@ class PiiDetector(Detector):
                 },
                 module=self.name,
                 confidence=0.85,
+                verdict_class=VerdictClass.INFO,
             )
         ]

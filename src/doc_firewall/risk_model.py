@@ -60,6 +60,17 @@ class RiskModel:
         # same keyword into a single finding (the higher-confidence one wins).
         # When the artifact is empty, include title to prevent unrelated findings
         # — e.g. two distinct T6 timeout findings — from wrongly merging.
+        # Keep the highest-*contribution* finding per group, not the highest-
+        # confidence one. threat_id is constant within a group, so severity ×
+        # confidence ranks contribution; this guarantees monotonicity — adding
+        # a finding can only keep or raise a group's contribution, so the risk
+        # score never DECREASES when more findings are present. (Keying on
+        # confidence alone let a higher-confidence-but-lower-severity finding
+        # replace a scarier one and lower the score — a real bug for a
+        # security verdict; caught by the property-based monotonicity test.)
+        def _contribution(f: Finding) -> float:
+            return self.severity_weights.get(f.severity, 0.5) * f.confidence
+
         best: dict[tuple, Finding] = {}
         for f in scoring_findings:
             artifact = (f.evidence or {}).get("malicious_text", "")
@@ -68,7 +79,7 @@ class RiskModel:
             else:
                 key = (f.threat_id, f.title[:40], "")
             existing = best.get(key)
-            if existing is None or f.confidence > existing.confidence:
+            if existing is None or _contribution(f) > _contribution(existing):
                 best[key] = f
 
         deduplicated = list(best.values())

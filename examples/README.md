@@ -36,7 +36,9 @@ pip install -e ".[ml]"      # adds BERT / sentence-transformers / YARA for examp
 | 8 | [08_advanced_ml_scanners.py](08_advanced_ml_scanners.py) | Isolate the advanced ML modules (BERT, TF-IDF, Aho-Corasick, entropy). |
 | 9 | [09_recommended_advanced_scan.py](09_recommended_advanced_scan.py) | Recommended max-security config: traditional + ML, `strict` profile. |
 | 11 | [11_custom_yaml_phrases.py](11_custom_yaml_phrases.py) | Feed custom zero-day phrases via a YAML Aho-Corasick list. |
-| 12 | [12_scan_folder.py](12_scan_folder.py) | Bulk-scan a folder → flat CSV + API-style JSON reports. |
+| 12 | [12_scan_folder.py](12_scan_folder.py) | Bulk-scan a folder → flat CSV + API-style JSON reports. Supports `--workers` (see below). |
+| 13 | [13_scan_resumes.py](13_scan_resumes.py) | Resume-focused folder scan driven by `resume.yaml`. Supports `--workers` (see below). |
+| 14 | [14_sanitize_for_rag.py](14_sanitize_for_rag.py) | Produce a cleaned copy safe for RAG / LLM ingestion via `scanner.sanitize()`. |
 
 ```bash
 python examples/01_basic_scan.py
@@ -46,9 +48,34 @@ python examples/12_scan_folder.py examples/samples --out reports/folder_scan
 > Valid `profile` values are `lenient`, `balanced`, and `strict` only. `strict`
 > lowers thresholds and enables all ML/YARA detectors for maximum recall.
 
+## Parallel scanning (`--workers`)
+
+The folder scanners — [12_scan_folder.py](12_scan_folder.py) and
+[13_scan_resumes.py](13_scan_resumes.py) — accept `--workers N` to scan a folder
+across `N` worker **processes**. The default is `1` (sequential), so existing
+runs and CI are unaffected.
+
+```bash
+python examples/12_scan_folder.py examples/samples --workers 4
+python examples/13_scan_resumes.py /path/to/resumes --workers 4
+```
+
+- **Processes, not threads.** Scanning is CPU-bound and the persistent Docling
+  (PDF) worker is serialized by a lock, so only separate processes give real
+  parallelism. Each worker builds its own `Scanner` **once** and reuses it across
+  every file it handles.
+- **Memory scales with `N`.** Every worker loads its own ML / Docling models —
+  4 workers ≈ 4× the footprint. Size `N` to roughly
+  `min(cpu_count, file_count, RAM ÷ per-process footprint)`, not a fixed number.
+- **Only worth it for large corpora.** Because each process pays the model-load
+  cost up front, small folders can be *slower* in parallel than sequential.
+- Output is identical to a sequential run (input order is preserved). You may see
+  a harmless `resource_tracker: leaked semaphore` warning at shutdown — it comes
+  from the ML stack, not the pool, and scales with `N`.
+- [14_sanitize_for_rag.py](14_sanitize_for_rag.py) is single-document (scan →
+  sanitize → re-scan) and has no `--workers` flag — there is nothing to parallelize.
+
 ## Advanced topics in tests/scripts
 
 - **Antivirus in Docker**: `scripts/test_antivirus_docker.py`
 - **Bulk dataset validation**: `scripts/validate_with_doc_firewall.py`
-</content>
-</invoke>

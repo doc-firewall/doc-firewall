@@ -61,9 +61,13 @@ class TestRiskModel(unittest.TestCase):
 
     def test_enrich_findings_plain_language(self):
         """enrich_findings() rewrites explain to plain language and preserves
-        the original technical text in technical_detail for findings the
-        mapping recognises; leaves others untouched."""
-        from doc_firewall.detectors.explanations import enrich_findings
+        the original technical text in technical_detail. Specific findings get
+        a tailored rewrite; everything else gets a threat-level fallback (0.5.0)
+        so no finding is ever left showing only raw detector jargon."""
+        from doc_firewall.detectors.explanations import (
+            _THREAT_FALLBACKS,
+            enrich_findings,
+        )
         original_oa = "Found suspicious token '/OpenAction' in raw file stream."
         oa_finding = Finding(
             ThreatID.T2_ACTIVE_CONTENT, Severity.HIGH,
@@ -72,7 +76,7 @@ class TestRiskModel(unittest.TestCase):
             evidence={"token": "/OpenAction"},
             module="fast_scan.pdf.tokens",
         )
-        # Finding NOT in the mapping — should pass through unchanged
+        # Finding NOT in the specific mapping — now gets the T9 threat fallback.
         original_passthrough = "Some bespoke detector message."
         passthrough = Finding(
             ThreatID.T9_ATS_MANIPULATION, Severity.LOW,
@@ -83,15 +87,16 @@ class TestRiskModel(unittest.TestCase):
 
         enrich_findings([oa_finding, passthrough])
 
-        # /OpenAction should be enriched
+        # /OpenAction should get the specific enrichment.
         assert "automatically the moment it's opened" in oa_finding.explain, (
             f"Plain explain not applied; got: {oa_finding.explain}"
         )
         assert oa_finding.technical_detail is not None
         assert "/OpenAction" in oa_finding.technical_detail
-        # Bespoke finding should pass through
-        assert passthrough.explain == original_passthrough
-        assert passthrough.technical_detail is None
+        # Un-recognised finding now gets the plain threat-level fallback, with
+        # its original message preserved as technical_detail.
+        assert passthrough.explain == _THREAT_FALLBACKS[ThreatID.T9_ATS_MANIPULATION]
+        assert passthrough.technical_detail == original_passthrough
 
     def test_verdict_is_class_based_not_score_based(self):
         """The verdict comes from finding classes, not from risk_score

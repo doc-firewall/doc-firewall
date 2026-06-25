@@ -2,15 +2,8 @@ from __future__ import annotations
 import zipfile
 from typing import Any, Dict
 
-try:
-    import defusedxml.ElementTree as ET  # noqa: F401
-except ImportError as e:
-    raise ImportError(
-        "defusedxml is required for safe XML parsing of untrusted documents. "
-        "Install it with: pip install defusedxml"
-    ) from e
-
 from ..base import ParsedDocument
+from ..ooxml_safe import safe_xml_root
 from ...config import ScanConfig
 from ...logger import get_logger
 
@@ -36,12 +29,10 @@ def _extract_slide_text(
     )
     for slide_path in slide_files[:max_slides]:
         try:
-            info = zf.getinfo(slide_path)
-            if info.file_size > max_part_size:
+            root = safe_xml_root(zf, slide_path, limit=max_part_size)
+            if root is None:
                 continue
-            with zf.open(slide_path) as f:
-                root = ET.parse(f).getroot()
-            
+
             slide_text = " ".join(t.strip() for t in root.itertext() if t and t.strip())
             if slide_text:
                 texts.append(slide_text)
@@ -77,44 +68,35 @@ def _extract_slide_text(
 def _extract_core_properties(zf: zipfile.ZipFile) -> Dict[str, Any]:
     """Extract Dublin Core / OPC core properties from docProps/core.xml."""
     meta: Dict[str, Any] = {}
-    if "docProps/core.xml" not in zf.namelist():
+    root = safe_xml_root(zf, "docProps/core.xml")
+    if root is None:
         return meta
-    try:
-        with zf.open("docProps/core.xml") as f:
-            root = ET.parse(f).getroot()
-        for child in root:
-            tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
-            if child.text:
-                meta[tag] = child.text.strip()
-    except Exception as e:
-        logger.debug("Error reading core.xml: %s", e)
+    for child in root:
+        tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+        if child.text:
+            meta[tag] = child.text.strip()
     return meta
 
 
 def _extract_app_properties(zf: zipfile.ZipFile) -> Dict[str, Any]:
     """Extract app properties from docProps/app.xml."""
     meta: Dict[str, Any] = {}
-    if "docProps/app.xml" not in zf.namelist():
+    root = safe_xml_root(zf, "docProps/app.xml")
+    if root is None:
         return meta
-    try:
-        with zf.open("docProps/app.xml") as f:
-            root = ET.parse(f).getroot()
-        for child in root:
-            tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
-            if child.text:
-                meta[tag] = child.text.strip()
-    except Exception as e:
-        logger.debug("Error reading app.xml: %s", e)
+    for child in root:
+        tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+        if child.text:
+            meta[tag] = child.text.strip()
     return meta
 
 
 def _extract_custom_properties(zf: zipfile.ZipFile) -> Dict[str, Any]:
     meta: Dict[str, Any] = {}
-    if "docProps/custom.xml" not in zf.namelist():
+    root = safe_xml_root(zf, "docProps/custom.xml")
+    if root is None:
         return meta
     try:
-        with zf.open("docProps/custom.xml") as f:
-            root = ET.parse(f).getroot()
         for prop in root.findall(".//{http://schemas.openxmlformats.org/officeDocument/2006/custom-properties}property"):
             name = prop.get("name")
             value_elem = prop.find(".//")
@@ -124,18 +106,20 @@ def _extract_custom_properties(zf: zipfile.ZipFile) -> Dict[str, Any]:
         logger.debug("Error reading custom.xml: %s", e)
     return meta
 
-def _extract_comments(zf: zipfile.ZipFile) -> str:
+def _extract_comments(zf: zipfile.ZipFile, max_parts: int = 64) -> str:
     texts: list[str] = []
+    seen = 0
     for n in zf.namelist():
         if n.startswith("ppt/comments/comment") and n.endswith(".xml"):
-            try:
-                with zf.open(n) as f:
-                    root = ET.parse(f).getroot()
-                for t in root.itertext():
-                    if t and t.strip():
-                        texts.append(t.strip())
-            except Exception:
-                pass
+            seen += 1
+            if seen > max_parts:
+                break
+            root = safe_xml_root(zf, n)
+            if root is None:
+                continue
+            for t in root.itertext():
+                if t and t.strip():
+                    texts.append(t.strip())
     return " ".join(texts)
 
 

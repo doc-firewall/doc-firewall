@@ -12,11 +12,9 @@ from __future__ import annotations
 
 import io
 import os
-import sys
 import tempfile
 import zipfile
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
 from doc_firewall import Scanner, ScanConfig, Limits
 from doc_firewall.enums import ThreatID

@@ -9,17 +9,13 @@ detectors to pattern-match injection content.
 from __future__ import annotations
 
 import re
-from ..base import ParsedDocument
+
 from ...config import ScanConfig
 from ...logger import get_logger
+from ..base import ParsedDocument
+from .fast_scan import _open_ole
 
 logger = get_logger()
-
-try:
-    import olefile  # type: ignore
-    _HAS_OLEFILE = True
-except ImportError:
-    _HAS_OLEFILE = False
 
 
 # Streams that typically carry user-visible text in legacy Office formats.
@@ -36,17 +32,11 @@ _PRINTABLE_RE = re.compile(rb"[\x20-\x7e\n\r\t]{6,}")
 
 def parse_ole(path: str, config: ScanConfig) -> ParsedDocument:
     """Parse a legacy OLE document and return a `ParsedDocument`."""
-    if not _HAS_OLEFILE:
-        return ParsedDocument(
-            file_path=path, file_type="ole", text="", metadata={}
-        )
-
     text_parts: list[str] = []
     metadata: dict = {}
-    try:
-        ole = olefile.OleFileIO(path)
-    except Exception as exc:
-        logger.debug("Failed to open OLE container %s: %s", path, exc)
+    ole = _open_ole(path)
+    if ole is None:
+        logger.debug("Failed to open OLE container %s", path)
         return ParsedDocument(file_path=path, file_type="ole", text="", metadata={})
 
     try:
