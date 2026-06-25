@@ -1,0 +1,11 @@
+# CODEOWNERS — default reviewers for doc-firewall.
+#
+# Each line is a file pattern followed by one or more owners. The LAST matching
+# pattern for a given file wins. Listed owners are automatically requested for
+# review on pull requests that touch matching files, which satisfies the
+# "code owner review required" branch-protection rule.
+#
+# Docs: https://docs.github.com/articles/about-code-owners
+
+# Default owners for everything in the repository.
+*       @doc-firewall @gm-gwu
