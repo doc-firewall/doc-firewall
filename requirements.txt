@@ -32,7 +32,7 @@ python-dotenv==1.2.2
     # via pydantic-settings
 structlog==26.1.0
     # via doc-firewall (pyproject.toml)
-typing-extensions==4.15.0
+typing-extensions==4.16.0
     # via
     #   pydantic
     #   pydantic-core
