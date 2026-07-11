@@ -95,8 +95,8 @@ what the docs promise matches what a caller actually gets.
   weak algorithm for credential hashing). `doc-firewall audit keygen` now
   generates salted PBKDF2-HMAC-SHA256 hashes (600,000 iterations); legacy
   unsalted SHA-256 key-store entries are no longer accepted and must be
-  rotated. The per-key rate-limit bucket id is now derived with a keyed HMAC
-  instead of a bare hash of the API key.
+  rotated. The per-key rate-limit bucket id is now the key store's own `id`
+  label for the matched key instead of any digest derived from the raw key.
 
 ### Removed
 

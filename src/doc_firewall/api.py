@@ -40,12 +40,11 @@ import hashlib
 import hmac
 import json
 import os
-import secrets
 import tempfile
 import threading
 import time
 from collections import defaultdict, deque
-from typing import Deque, Dict, Optional
+from typing import Deque, Dict, List, Optional
 
 try:
     from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
@@ -70,9 +69,9 @@ app = FastAPI(
 
 
 # ── API-key store ────────────────────────────────────────────────────────────
-def _load_api_key_hashes(path: Optional[str]) -> Optional[set]:
-    """Load the set of allowed key hashes (salted PBKDF2 format) from a JSON
-    store.
+def _load_api_key_entries(path: Optional[str]) -> Optional[List[Dict[str, str]]]:
+    """Load the allowed API key entries (salted PBKDF2 hash format) from a
+    JSON store.
 
     Accepts either a bare list of entries or a ``{"keys": [...]}`` wrapper;
     each entry is ``{"id", "name", "hash"}`` (as produced by
@@ -83,9 +82,13 @@ def _load_api_key_hashes(path: Optional[str]) -> Optional[set]:
         return None
     with open(path, "r", encoding="utf-8") as fh:
         data = json.load(fh)
-    entries = data.get("keys", []) if isinstance(data, dict) else data
-    hashes = {e["hash"].lower() for e in entries if isinstance(e, dict) and e.get("hash")}
-    return hashes
+    raw_entries = data.get("keys", []) if isinstance(data, dict) else data
+    entries = []
+    for i, e in enumerate(raw_entries):
+        if not isinstance(e, dict) or not e.get("hash"):
+            continue
+        entries.append({"id": str(e.get("id") or f"key-{i}"), "hash": e["hash"].lower()})
+    return entries
 
 
 def _verify_api_key_legacy_sha256(provided_key: str, stored_hash: str) -> bool:
@@ -121,13 +124,6 @@ def _verify_api_key(provided_key: str, stored_hash: str) -> bool:
     return _verify_api_key_legacy_sha256(provided_key, stored_hash)
 
 
-# Process-local secret for deriving rate-limit bucket ids from API keys. Using
-# a keyed HMAC (rather than a bare hash) means the bucket id is not a
-# reusable digest of the credential itself. Generated once per process since
-# the rate limiter's state is in-memory and process-local anyway.
-_RATE_LIMIT_KEY_SECRET = secrets.token_bytes(32)
-
-
 # ── Per-key rate limiter (in-memory sliding window) ──────────────────────────
 class _RateLimiter:
     def __init__(self, rpm: int) -> None:
@@ -154,7 +150,7 @@ class _RateLimiter:
 class _State:
     def __init__(self) -> None:
         self.config = ScanConfig()
-        self.api_key_hashes = _load_api_key_hashes(self.config.api_keys_path)
+        self.api_key_entries = _load_api_key_entries(self.config.api_keys_path)
         self.max_upload = int(self.config.api_max_upload_bytes)
         self.rate_limiter = _RateLimiter(int(self.config.api_rate_limit_rpm))
         # Cache one Scanner per (profile, enable_ml) combination — constructing a
@@ -200,19 +196,21 @@ def require_api_key(x_api_key: Optional[str] = Header(None)) -> str:
     per-key rate limit. Returns an opaque key id for logging."""
     state = _get_state()
 
-    if state.api_key_hashes is None:
+    if state.api_key_entries is None:
         key_id = "anonymous"
     else:
         if not x_api_key:
             raise HTTPException(status_code=401, detail="Missing X-API-Key header")
-        if not any(_verify_api_key(x_api_key, stored) for stored in state.api_key_hashes):
+        matched_id = next(
+            (e["id"] for e in state.api_key_entries if _verify_api_key(x_api_key, e["hash"])),
+            None,
+        )
+        if matched_id is None:
             raise HTTPException(status_code=401, detail="Invalid API key")
-        # Rate-limit per key without exposing the raw key or its auth hash in
-        # memory keys. Use a keyed digest (HMAC) rather than a bare hash so the
-        # derived identifier isn't a directly reusable digest of the credential.
-        key_id = hmac.new(
-            _RATE_LIMIT_KEY_SECRET, x_api_key.encode(), hashlib.sha256
-        ).hexdigest()[:16]
+        # Rate-limit by the key store's own (non-secret) id label rather than
+        # any value derived from the raw key, so no credential material is
+        # hashed here at all.
+        key_id = f"key:{matched_id}"
 
     if not state.rate_limiter.allow(key_id):
         raise HTTPException(
