@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc-firewall"
-version = "0.5.0"
+version = "0.5.1"
 description = "LLM-aware document intake security scanning for PDF/DOCX/PPTX/XLSX"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -34,7 +34,6 @@ dependencies = [
   "pydantic>=2.0",
   "pydantic-settings>=2.14.2",  # GHSA-4xgf-cpjx-pc3j: <2.14.2 follows symlinks outside secrets_dir
   "filelock>=3.20.3",
-  "pip>=26.1.2"
 ]
 
 [project.optional-dependencies]
@@ -58,12 +57,30 @@ formats = [
 crypto = [
   "pikepdf>=8.0.0"
 ]
+api = [
+  "fastapi>=0.110.0",
+  "uvicorn[standard]>=0.27.0",
+  "python-multipart>=0.0.9",
+]
+# Soft dependencies the test suite imports directly (yaml for policy tests,
+# pyahocorasick for 35+ advanced-matcher tests). Kept in their own extra so
+# `pip install -e .[test] && pytest` is green from the documented command.
+test = [
+    "pytest>=8.0.0",
+    "hypothesis>=6.100.0",
+    "pyyaml>=6.0",
+    "pyahocorasick>=2.0.0",
+    "striprtf>=0.0.26",
+    "html5lib>=1.1",
+]
 dev = [
     "build",
     "twine",
-    "pytest>=9.0.3",
+    "pytest>=8.0.0",
     "ruff",
     "hypothesis>=6.100.0",
+    "pyyaml>=6.0",
+    "pyahocorasick>=2.0.0",
 ]
 
 [project.urls]

@@ -59,11 +59,17 @@ the caller owns.
 
 - **Visible content is preserved** — only invisible / unsafe constructs are
   removed. A sanitized résumé keeps the candidate's real text.
-- **The result re-scans clean** — by design, feeding `output_path` back into
-  `scan()` returns ALLOW (covered by the round-trip test).
+- **`sanitized=True` is verified, not assumed** *(0.5.1)* — `sanitize()`
+  automatically re-scans the cleaned copy and, if any residual threat remains
+  (verdict ≠ ALLOW), downgrades to `sanitized=False` with a `reason` naming the
+  residual threats. This means a threat the sanitizer **cannot** remove — e.g. a
+  **visible-body prompt injection**, or metadata you chose to keep via
+  `sanitize_remove_categories` — is never reported as neutralised, so the
+  trojan→BLOCK / sanitized→ALLOW round-trip holds. The verification can be
+  disabled with `cfg.sanitize_verify_rescan = False` (not recommended).
 - **It is conservative**, not a full document rebuild: it targets the
-  constructs the detectors flag. For maximum assurance, re-scan the
-  sanitized copy before ingesting (one line, and it should be ALLOW).
+  constructs the detectors flag. Because of the re-scan above, a document it
+  can't fully clean returns `sanitized=False` rather than a false green light.
 - **PDF sanitization requires `pikepdf`** (`pip install doc-firewall[crypto]`);
   without it PDFs return `sanitized=False` (fall back to BLOCK). pikepdf also
   decrypts permissions-encrypted PDFs in passing.

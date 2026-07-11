@@ -67,6 +67,14 @@ for path in document_queue:
     report = scanner.scan(path)   # reuses compiled rules and models
 ```
 
+Constructing a `Scanner` re-runs the expensive one-time setup (compiling the
+Aho-Corasick automata, loading the bundled ML classifier), so building one per
+call is dramatically slower. As of **0.5.1** the module-level
+`from doc_firewall import scan; scan(path)` helper reuses a cached default
+`Scanner` for the default-config path, so the common one-liner is no longer
+~34× slower than a reused instance — but for a custom `config`/`policy_engine`,
+still construct one `Scanner` and reuse it as above.
+
 ### Limit BERT chunks
 ```python
 config = ScanConfig(
