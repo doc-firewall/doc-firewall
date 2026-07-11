@@ -93,9 +93,10 @@ what the docs promise matches what a caller actually gets.
   `seq` counter + optional keyed chain rather than marketing language.
 - **REST API keys were hashed with unsalted SHA-256** (flagged by CodeQL as a
   weak algorithm for credential hashing). `doc-firewall audit keygen` now
-  generates salted PBKDF2-HMAC-SHA256 hashes (600,000 iterations); the API
-  verifies both the new format and legacy unsalted SHA-256 hashes so existing
-  key stores keep working.
+  generates salted PBKDF2-HMAC-SHA256 hashes (600,000 iterations); legacy
+  unsalted SHA-256 key-store entries are no longer accepted and must be
+  rotated. The per-key rate-limit bucket id is now derived with a keyed HMAC
+  instead of a bare hash of the API key.
 
 ### Removed
 

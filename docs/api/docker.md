@@ -40,9 +40,10 @@ curl -X POST -F "file=@suspicious.pdf" \
 
 When `api_keys_path` (env `DOC_FIREWALL_API_KEYS_PATH`) points at a JSON key
 store, `POST /scan` requires an `X-API-Key` header; the raw key is verified
-against the stored salted PBKDF2-HMAC-SHA256 hash (legacy unsalted SHA-256
-hashes are still accepted for backward compatibility). When it is unset, the
-API is open (no auth) — do not expose it publicly in that mode.
+against the stored salted PBKDF2-HMAC-SHA256 hash. Legacy unsalted SHA-256
+key-store entries are no longer accepted and must be regenerated with
+`doc-firewall audit keygen`. When `api_keys_path` is unset, the API is open
+(no auth) — do not expose it publicly in that mode.
 
 Generate a key + hash pair with the CLI, then add the printed JSON entry to the
 key store:
