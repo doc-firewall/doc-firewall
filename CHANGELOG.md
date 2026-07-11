@@ -5,6 +5,105 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-07-11
+
+Theme: **harden the surfaces around detection.** A hardening release that fixes
+the advertised-but-broken layers around the (solid) detection core — the REST
+API, `sanitize()`, archive/zip-bomb defense, and CLI output/exit behavior — so
+what the docs promise matches what a caller actually gets.
+
+### Added
+
+- **REST API microservice (`doc_firewall.api:app`).** The documented FastAPI
+  service now exists: `POST /scan` (multipart upload, `profile` + `enable_ml`
+  query params) and `GET /health`. Ships the advertised controls — `X-API-Key`
+  auth against the `api_keys_path` SHA-256 key store, per-key sliding-window
+  rate limiting (`api_rate_limit_rpm`), and a streamed upload cap
+  (`api_max_upload_bytes`, enforced by Content-Length **and** byte count).
+  Server deps live in a new `[api]` extra (`fastapi`, `uvicorn`,
+  `python-multipart`).
+- **`--fail-on {none,flag,block}` CLI flag.** `doc-firewall scan` can now gate
+  CI / shell pipelines by exiting non-zero (code **2**, distinct from the exit-1
+  used for usage/operational errors) when a scanned document's verdict meets the
+  threshold. Default `none` preserves the historical always-0 behavior.
+- **`[test]` install extra.** `pytest`, `hypothesis`, `pyyaml`, `pyahocorasick`,
+  `striprtf`, `html5lib` — so `pip install -e ".[test]" && pytest` is green from
+  the documented command. `pyyaml` + `pyahocorasick` are also in `[dev]`.
+- **`sanitize_verify_rescan` config flag** (default `True`) — re-scans the
+  cleaned copy and enforces the residual-threat contract (see Fixed).
+- **`limits.max_archive_total_uncompressed_mb` config** (default 200) — total
+  expansion budget across a nested-archive tree.
+- **`evidence_max_chars` config** (default 250) — one authoritative,
+  configurable cap for `evidence["malicious_text"]`, applied uniformly to every
+  finding (see Fixed).
+- **Optional keyed audit-log chain.** Set `DOC_FIREWALL_AUDIT_HMAC_KEY` to make
+  the audit chain an **HMAC-SHA256** (tamper-*resistant*: unforgeable without
+  the key) instead of the default unkeyed SHA-256 (tamper-*evident*). Each entry
+  now also carries a monotonic `seq` counter, and `verify-chain` accepts
+  `--expected-count N` to detect tail-truncation against an external anchor.
+- **In-memory / stream scanning API.** `Scanner.scan_bytes(data, filename=...)`,
+  `Scanner.scan_stream(fileobj, filename=...)`, and the module-level
+  `scan_bytes(...)` scan documents held in memory (RAG / web uploads) without the
+  caller managing a temp file. The internal temp path is never exposed;
+  content-hash caching still applies.
+- **Effective configuration in the coverage report.** `report.coverage` now
+  includes `profile` and an `effective_config` summary (profile, `fast_only`, and
+  the active ML layers), so a caller can confirm what actually ran.
+- **Documented stable evidence schema.** The `evidence` keys SIEM consumers can
+  rely on (`malicious_text`, `malicious_text_source`, `subtype`,
+  `evidence_unavailable_reason`, `debug_steps`, `archive_member`) are now
+  documented as stable.
+
+### Fixed
+
+- **Recursive archive scanning was exponential and the depth limit never fired
+  (DoS).** Archive members were scanned through the public `scan()` — which
+  reset archive depth to 0 and *also* recursed explicitly, so every nested
+  archive was scanned twice per level (`2^N` growth, `max_archive_depth`
+  bypassed). Members are now scanned as leaves with depth threaded through a
+  single recursion path, de-duplicated by content SHA-256, and capped by the new
+  total-expansion budget. Growth is now linear and the depth-limit finding
+  fires; a 6-layer nest that previously timed out (>2 min) completes in ~0.01 s.
+- **`sanitize()` could green-light an un-neutralized document.** It reported
+  `sanitized=True` for threats it can't strip (e.g. a visible-body prompt
+  injection), returning a byte-identical "cleaned" copy that still failed the
+  scan. `Scanner.sanitize()` now re-scans the output and returns
+  `sanitized=False` (with a residual-threat `reason`) whenever the copy doesn't
+  re-scan ALLOW, so the trojan→BLOCK / sanitized→ALLOW round-trip actually holds.
+- **`--json` / `--siem-format` output was corrupted by logs on stdout.** Logging
+  now goes to **stderr** and is quiet (WARNING) by default — library-safe;
+  verbosity is opt-in via `DOC_FIREWALL_LOG_LEVEL`. stdout is reserved for
+  machine-readable output, so `--json` is valid JSON.
+- **CLI `scan` always exited 0.** See `--fail-on` above.
+- **Invalid `profile` values were silently accepted and quietly weakened the
+  scan.** `ScanConfig` now raises `ValueError` for any profile outside
+  `{lenient, balanced, strict}` instead of falling through to base defaults.
+- **Module-level `scan()` was ~34× slower than a reused `Scanner`.** It built a
+  fresh `Scanner` (recompiling automata, loading the ML classifier) on every
+  call; it now reuses a cached default `Scanner` for the default-config path.
+- **Audit log stamped a hardcoded `0.4.0`.** `library_version` is now derived
+  from installed package metadata.
+- **Result-cache aliasing.** Cache hits copied the report but shared the same
+  `findings` list; the list is now copied so a caller can't corrupt the cache.
+- **Inconsistent evidence truncation.** Detectors capped `malicious_text` at
+  120/200/250/300 while the docs promised 250; a single configurable
+  `evidence_max_chars` (default 250) is now applied uniformly.
+- **Overstated "immutable" audit log.** The trust model is now stated precisely
+  (unkeyed = tamper-evident; keyed HMAC = tamper-resistant) and backed by a
+  `seq` counter + optional keyed chain rather than marketing language.
+- **REST API keys were hashed with unsalted SHA-256** (flagged by CodeQL as a
+  weak algorithm for credential hashing). `doc-firewall audit keygen` now
+  generates salted PBKDF2-HMAC-SHA256 hashes (600,000 iterations); legacy
+  unsalted SHA-256 key-store entries are no longer accepted and must be
+  rotated. The per-key rate-limit bucket id is now the key store's own `id`
+  label for the matched key instead of any digest derived from the raw key.
+
+### Removed
+
+- **`pip` as a runtime dependency.** Pinning `pip` as a package dependency is an
+  install-wedging anti-pattern; dropped it. `pytest` floor lowered to a real
+  release.
+
 ## [0.5.0] - 2026-06-24
 
 Theme: **detect injection in any language, act on what you find, and catch

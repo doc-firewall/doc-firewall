@@ -4,6 +4,7 @@ import asyncio
 import os
 import tarfile
 import tempfile
+import threading
 import zipfile as _zipfile
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
@@ -369,13 +370,26 @@ class Scanner:
         archive_path: str,
         parent_report: ScanReport,
         depth: int = 0,
+        *,
+        seen_hashes: Optional[set] = None,
+        budget: Optional[dict] = None,
     ) -> None:
         """Unpack a ZIP or tar archive and recursively scan each member (B.7).
 
         Findings from sub-scans are merged into *parent_report* with
         ``evidence["archive_member"]`` indicating the originating path.
-        Stops at ``limits.max_archive_depth`` recursion levels and
-        ``limits.max_archive_members`` per archive.
+
+        Bounded so a nested archive can never blow up (BUG-1 fix):
+
+          * ``depth`` is threaded through the *single* recursion path here —
+            members are scanned with ``scan_archives=False`` so the public scan
+            entry point can't reset the counter and re-enter at depth 0. The
+            ``limits.max_archive_depth`` guard therefore actually fires.
+          * Members are de-duplicated by content SHA-256 (``seen_hashes``), so a
+            quadratic "many copies of the same nested archive" bomb is scanned
+            once.
+          * A shared uncompressed-bytes ``budget`` caps total expansion across
+            the whole tree, bounding decompression-ratio (zip-bomb) attacks.
         """
         if depth >= self.config.limits.max_archive_depth:
             parent_report.add(Finding(
@@ -391,8 +405,38 @@ class Scanner:
             ))
             return
 
+        # Shared state across the whole nested-archive tree.
+        if seen_hashes is None:
+            seen_hashes = set()
+        if budget is None:
+            budget = {"bytes": 0}
+
         max_mb = self.config.limits.max_mb * 1024 * 1024
         max_members = self.config.limits.max_archive_members
+        max_total = self.config.limits.max_archive_total_uncompressed_mb * 1024 * 1024
+
+        def _budget_exceeded(name: str, size: int) -> bool:
+            budget["bytes"] += max(0, size)
+            if budget["bytes"] > max_total:
+                parent_report.add(Finding(
+                    threat_id=ThreatID.T6_DOS,
+                    severity=Severity.HIGH,
+                    title="Archive Expansion Budget Exceeded",
+                    explain=(
+                        "Total uncompressed size across archive members exceeded "
+                        f"{self.config.limits.max_archive_total_uncompressed_mb} MB "
+                        "(possible zip bomb). Remaining contents were not scanned."
+                    ),
+                    evidence={
+                        "member": name,
+                        "total_uncompressed_bytes": budget["bytes"],
+                        "subtype": "decompression_budget",
+                    },
+                    confidence=0.75,
+                    module="scanner.archive",
+                ))
+                return True
+            return False
 
         with tempfile.TemporaryDirectory(prefix="docfw_arc_") as tmpdir:
             members_extracted = 0
@@ -402,6 +446,8 @@ class Scanner:
                         for member in tf.getmembers():
                             if members_extracted >= max_members:
                                 break
+                            if not member.isfile():
+                                continue
                             if member.size > max_mb:
                                 parent_report.add(Finding(
                                     threat_id=ThreatID.T6_DOS,
@@ -412,8 +458,8 @@ class Scanner:
                                     module="scanner.archive",
                                 ))
                                 continue
-                            if not member.isfile():
-                                continue
+                            if _budget_exceeded(member.name, member.size):
+                                break
                             tf.extract(member, path=tmpdir, filter="data")
                             members_extracted += 1
                 elif _zipfile.is_zipfile(archive_path):
@@ -421,6 +467,8 @@ class Scanner:
                         for info in zf.infolist():
                             if members_extracted >= max_members:
                                 break
+                            if info.filename.endswith("/"):
+                                continue
                             if info.file_size > max_mb:
                                 parent_report.add(Finding(
                                     threat_id=ThreatID.T6_DOS,
@@ -431,8 +479,8 @@ class Scanner:
                                     module="scanner.archive",
                                 ))
                                 continue
-                            if info.filename.endswith("/"):
-                                continue
+                            if _budget_exceeded(info.filename, info.file_size):
+                                break
                             zf.extract(info, path=tmpdir)
                             members_extracted += 1
                 else:
@@ -447,16 +495,34 @@ class Scanner:
                     member_path = os.path.join(root, fname)
                     relative = os.path.relpath(member_path, tmpdir)
                     try:
-                        sub_report = self.scan(member_path)
+                        # Content-hash de-duplication: identical members (a
+                        # common amplification trick) are scanned only once.
+                        try:
+                            member_hash = sha256_file(member_path)
+                        except Exception:
+                            member_hash = None
+                        if member_hash is not None:
+                            if member_hash in seen_hashes:
+                                continue
+                            seen_hashes.add(member_hash)
+
+                        # Scan the member WITHOUT re-triggering archive
+                        # recursion — recursion is driven explicitly below so
+                        # depth is threaded correctly (never reset to 0).
+                        sub_report = self.scan(member_path, scan_archives=False)
                         for finding in sub_report.findings:
                             # Tag with originating archive member path
                             finding.evidence = dict(finding.evidence or {})
                             finding.evidence["archive_member"] = relative
                             parent_report.add(finding)
-                        # Recurse into nested archives
+                        # Recurse into nested archives at depth + 1, sharing the
+                        # dedup set and expansion budget across the whole tree.
                         member_ftype = _detect_file_type_by_magic(member_path)
                         if member_ftype == "zip" and self.config.enable_archive_scan:
-                            self._scan_archive(member_path, parent_report, depth + 1)
+                            self._scan_archive(
+                                member_path, parent_report, depth + 1,
+                                seen_hashes=seen_hashes, budget=budget,
+                            )
                     except Exception as exc:
                         logger.debug("Sub-scan error for %s: %s", relative, exc)
 
@@ -467,6 +533,21 @@ class Scanner:
         reduced coverage. Must run BEFORE get_verdict()."""
         cov = self._coverage
         report.coverage = cov.to_dict()
+
+        # Feature #11: surface the *effective* configuration so a caller can
+        # confirm what actually ran (not just what they think they asked for).
+        report.coverage["profile"] = self.config.profile
+        report.coverage["effective_config"] = {
+            "profile": self.config.profile,
+            "fast_only": bool(getattr(self.config, "fast_only", False)),
+            "ml": {
+                "advanced_ahocorasick": bool(getattr(self.config, "enable_advanced_ahocorasick", False)),
+                "advanced_bert": bool(getattr(self.config, "enable_advanced_bert", False)),
+                "semantic_nn": bool(getattr(self.config, "enable_semantic_nn", False)),
+                "yara": bool(getattr(self.config, "enable_yara", False)),
+                "injection_classifier": bool(getattr(self.config, "enable_injection_classifier", False)),
+            },
+        }
 
         required = set(getattr(self.config, "required_capabilities", []) or [])
         missing_required = sorted(
@@ -605,6 +686,8 @@ class Scanner:
         self,
         file_path: str,
         policy_name: Optional[str] = None,
+        *,
+        scan_archives: bool = True,
     ) -> ScanReport:
         file_path = os.path.abspath(file_path)
 
@@ -732,7 +815,8 @@ class Scanner:
             )
             report.risk_score = self.risk_model.calculate_risk(report.findings)
             enrich_findings(report.findings)
-            apply_evidence_contract(report.findings, report.file_type, report.file_path)
+            apply_evidence_contract(report.findings, report.file_type, report.file_path,
+                                    max_chars=getattr(self.config, "evidence_max_chars", 250))
             self._apply_coverage(report)
             self._apply_unscannable_policy(report)
             report.verdict = self.risk_model.get_verdict(report.risk_score, report.findings)
@@ -838,7 +922,10 @@ class Scanner:
 
         # B.7: Recursively scan plain ZIP archives — run synchronously in executor
         # so we reuse the existing scan() path for each extracted member.
-        if ftype == "zip" and self.config.enable_archive_scan:
+        # scan_archives is False when this scan is itself a member of an outer
+        # archive: the enclosing _scan_archive drives recursion so depth is
+        # threaded correctly (BUG-1 — prevents the depth counter resetting to 0).
+        if ftype == "zip" and self.config.enable_archive_scan and scan_archives:
             await loop.run_in_executor(
                 self._executor, self._scan_archive, file_path, report, 0
             )
@@ -854,7 +941,8 @@ class Scanner:
                 report.findings, custom_threat_weights=custom_weights
             )
             enrich_findings(report.findings)
-            apply_evidence_contract(report.findings, report.file_type, report.file_path)
+            apply_evidence_contract(report.findings, report.file_type, report.file_path,
+                                    max_chars=getattr(self.config, "evidence_max_chars", 250))
             self._apply_coverage(report)
             self._apply_unscannable_policy(report)
             report.verdict = self.risk_model.get_verdict(report.risk_score, report.findings)
@@ -873,7 +961,8 @@ class Scanner:
                 report.findings, custom_threat_weights=custom_weights
             )
             enrich_findings(report.findings)
-            apply_evidence_contract(report.findings, report.file_type, report.file_path)
+            apply_evidence_contract(report.findings, report.file_type, report.file_path,
+                                    max_chars=getattr(self.config, "evidence_max_chars", 250))
             self._apply_coverage(report)
             self._apply_unscannable_policy(report)
             report.verdict = self.risk_model.get_verdict(report.risk_score, report.findings)
@@ -912,7 +1001,8 @@ class Scanner:
             log_ctx.info("Skipping deep scan (score below threshold)", score=fast_score)
             report.risk_score = fast_score
             enrich_findings(report.findings)
-            apply_evidence_contract(report.findings, report.file_type, report.file_path)
+            apply_evidence_contract(report.findings, report.file_type, report.file_path,
+                                    max_chars=getattr(self.config, "evidence_max_chars", 250))
             self._apply_coverage(report)
             self._apply_unscannable_policy(report)
             report.verdict = self.risk_model.get_verdict(report.risk_score, report.findings)
@@ -1186,7 +1276,8 @@ class Scanner:
             report.findings, custom_threat_weights=custom_weights
         )
         enrich_findings(report.findings)
-        apply_evidence_contract(report.findings, report.file_type, report.file_path)
+        apply_evidence_contract(report.findings, report.file_type, report.file_path,
+                                    max_chars=getattr(self.config, "evidence_max_chars", 250))
         self._apply_coverage(report)
         self._apply_unscannable_policy(report)
         report.verdict = self.risk_model.get_verdict(report.risk_score, report.findings)
@@ -1217,15 +1308,28 @@ class Scanner:
 
         return report
 
-    def scan(self, file_path: str, policy_name: Optional[str] = None) -> ScanReport:
-        """Synchronous wrapper (blocking). Uses asyncio.run() for safety."""
+    def scan(
+        self,
+        file_path: str,
+        policy_name: Optional[str] = None,
+        *,
+        scan_archives: bool = True,
+    ) -> ScanReport:
+        """Synchronous wrapper (blocking). Uses asyncio.run() for safety.
+
+        ``scan_archives=False`` scans the file as a leaf (no ZIP/tar recursion);
+        used internally by :meth:`_scan_archive` so archive depth is threaded
+        through a single recursion path.
+        """
         # W7 (0.5.0): content-hash result cache. Identical content (any path)
         # returns the cached verdict without re-scanning — for pipelines that
         # re-ingest the same documents. Only when no per-call policy is given
-        # (a policy can change the result).
+        # (a policy can change the result). Skipped for the internal
+        # archive-member path so a leaf scan can't collide with a full scan of
+        # the same bytes.
         cache = self._result_cache
         cache_key = None
-        if cache is not None and policy_name is None:
+        if cache is not None and policy_name is None and scan_archives:
             try:
                 cache_key = sha256_file(file_path)
             except Exception:
@@ -1233,7 +1337,13 @@ class Scanner:
             if cache_key is not None and cache_key in cache:
                 cache.move_to_end(cache_key)
                 import dataclasses
-                return dataclasses.replace(cache[cache_key], file_path=file_path)
+                cached = cache[cache_key]
+                # Copy the findings list so a caller mutating report.findings
+                # cannot corrupt the shared cached entry (dataclasses.replace
+                # is a shallow copy and would otherwise alias the same list).
+                return dataclasses.replace(
+                    cached, file_path=file_path, findings=list(cached.findings)
+                )
 
         try:
             asyncio.get_running_loop()
@@ -1246,11 +1356,18 @@ class Scanner:
 
             with _TPE(max_workers=1) as pool:
                 future = pool.submit(
-                    asyncio.run, self.scan_async(file_path, policy_name=policy_name)
+                    asyncio.run,
+                    self.scan_async(
+                        file_path, policy_name=policy_name, scan_archives=scan_archives
+                    ),
                 )
                 report = future.result()
         else:
-            report = asyncio.run(self.scan_async(file_path, policy_name=policy_name))
+            report = asyncio.run(
+                self.scan_async(
+                    file_path, policy_name=policy_name, scan_archives=scan_archives
+                )
+            )
 
         if cache is not None and cache_key is not None:
             cache[cache_key] = report
@@ -1260,6 +1377,62 @@ class Scanner:
 
     # Alias for backward compatibility with CLI and external callers
     scan_sync = scan
+
+    def scan_bytes(
+        self,
+        data: bytes,
+        filename: Optional[str] = None,
+        policy_name: Optional[str] = None,
+    ) -> ScanReport:
+        """Scan an in-memory document (bytes) without the caller managing a
+        temp file.
+
+        RAG and web-upload pipelines usually hold the document in memory; this
+        spools it to a private temp file, scans it, and cleans up — so callers
+        don't have to. ``filename`` (if given) supplies the extension used for
+        type detection and is reported back as ``report.file_path``; the actual
+        temp path is never exposed. Content-hash result caching still applies,
+        so re-submitting identical bytes hits the cache.
+        """
+        if isinstance(data, str):
+            data = data.encode("utf-8")
+        if not isinstance(data, (bytes, bytearray)):
+            raise TypeError("scan_bytes expects bytes (or str); got "
+                            f"{type(data).__name__}")
+
+        suffix = ""
+        if filename and "." in os.path.basename(filename):
+            suffix = "." + filename.rsplit(".", 1)[-1]
+        fd, tmp_path = tempfile.mkstemp(prefix="docfw_bytes_", suffix=suffix)
+        try:
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(data)
+            report = self.scan(tmp_path, policy_name=policy_name)
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+        # Report the caller's name, never the internal temp path.
+        report.file_path = filename or "<bytes>"
+        return report
+
+    def scan_stream(
+        self,
+        stream,
+        filename: Optional[str] = None,
+        policy_name: Optional[str] = None,
+    ) -> ScanReport:
+        """Scan a binary file-like object (anything with ``.read()``).
+
+        Convenience wrapper over :meth:`scan_bytes` for Flask/FastAPI upload
+        objects, ``io.BytesIO``, open file handles, etc.
+        """
+        data = stream.read()
+        name = filename or getattr(stream, "name", None)
+        if isinstance(name, str) and (name.startswith("<") or name.startswith("/dev")):
+            name = filename  # ignore pseudo-names like "<stdin>"
+        return self.scan_bytes(data, filename=name, policy_name=policy_name)
 
     def sanitize(self, file_path: str, output_path: Optional[str] = None):
         """W3 (0.5.0): produce a cleaned copy safe for LLM/RAG ingestion.
@@ -1285,7 +1458,62 @@ class Scanner:
         if base in ("zip", "unknown"):
             ext = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else ""
             base = ext or base
-        return sanitize_file(file_path, base, self.config, output_path)
+        result = sanitize_file(file_path, base, self.config, output_path)
+
+        # BUG-2 fix: enforce the residual-threat contract. A sanitizer that
+        # strips only hidden text / macros / metadata leaves a *visible-body*
+        # injection in place and would otherwise return sanitized=True with a
+        # still-malicious copy — a caller following the documented round-trip
+        # would forward it into their RAG pipeline believing it was neutralised.
+        # Re-scan the cleaned copy; if any residual threat remains (verdict is
+        # not ALLOW) downgrade to sanitized=False so the caller falls back to
+        # BLOCK, exactly as the docstring promises.
+        if (
+            result.sanitized
+            and result.output_path
+            and getattr(self.config, "sanitize_verify_rescan", True)
+        ):
+            try:
+                rescan = self.scan(result.output_path)
+            except Exception as exc:  # a scan failure is not a safety signal we can trust
+                logger.debug("sanitize re-scan failed for %s: %s", result.output_path, exc)
+                rescan = None
+            if rescan is not None and rescan.verdict != Verdict.ALLOW:
+                residual = sorted({
+                    f.threat_id.value for f in rescan.findings
+                    if f.evidence.get("subtype") != "reduced_coverage"
+                })
+                result.sanitized = False
+                result.reason = (
+                    "residual threats remain after sanitization "
+                    f"(verdict={rescan.verdict.value}"
+                    + (f", threats: {', '.join(residual)}" if residual else "")
+                    + ") — the sanitizer cannot neutralise this document; treat as BLOCK"
+                )
+        return result
+
+
+_DEFAULT_SCANNER: Optional["Scanner"] = None
+_DEFAULT_SCANNER_LOCK = threading.Lock()
+
+
+def _get_default_scanner() -> "Scanner":
+    """Lazily build and cache a default-config Scanner.
+
+    Constructing a Scanner re-runs the expensive one-time setup (compiling the
+    Aho-Corasick automata, loading the bundled ML classifier, building the
+    coverage report). The module-level ``scan()`` is the most-documented entry
+    point and was constructing a fresh Scanner on *every* call — ~34× slower
+    than reusing one. Amortise it here for the common default-config path.
+    """
+    global _DEFAULT_SCANNER
+    scanner = _DEFAULT_SCANNER
+    if scanner is None:
+        with _DEFAULT_SCANNER_LOCK:
+            scanner = _DEFAULT_SCANNER
+            if scanner is None:
+                scanner = _DEFAULT_SCANNER = Scanner()
+    return scanner
 
 
 def scan(
@@ -1294,6 +1522,31 @@ def scan(
     policy_name: Optional[str] = None,
     policy_engine: Optional[PolicyEngine] = None,
 ) -> ScanReport:
+    # Reuse a cached default Scanner for the default-config path so the common
+    # `from doc_firewall import scan; scan(path)` pattern isn't 34× slower than
+    # it needs to be. A caller-supplied config or policy engine still gets a
+    # dedicated Scanner (its setup can't be shared safely).
+    if config is None and policy_engine is None:
+        return _get_default_scanner().scan(file_path, policy_name=policy_name)
     return Scanner(config=config, policy_engine=policy_engine).scan(
         file_path, policy_name=policy_name
+    )
+
+
+def scan_bytes(
+    data: bytes,
+    filename: Optional[str] = None,
+    config: Optional[ScanConfig] = None,
+    policy_name: Optional[str] = None,
+    policy_engine: Optional[PolicyEngine] = None,
+) -> ScanReport:
+    """Scan an in-memory document (bytes) — the module-level convenience form of
+    :meth:`Scanner.scan_bytes`. Reuses the cached default Scanner for the
+    default-config path."""
+    if config is None and policy_engine is None:
+        return _get_default_scanner().scan_bytes(
+            data, filename=filename, policy_name=policy_name
+        )
+    return Scanner(config=config, policy_engine=policy_engine).scan_bytes(
+        data, filename=filename, policy_name=policy_name
     )

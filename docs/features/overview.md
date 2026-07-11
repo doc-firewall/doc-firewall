@@ -114,8 +114,8 @@ Enable `enable_steganography_checks=True` for the additional image-level checks 
 
 ## Audit & Security Operations
 
-- **Tamper-Evident Audit Log** — Append-only JSONL file with SHA-256 hash chain. Every scan produces an immutable entry (file hash, verdict, risk score, threat IDs). `doc-firewall audit verify-chain` detects any tampering.
-- **REST API Authentication** — SHA-256-hashed API keys (`KeyStore`) with per-key token-bucket rate limiting (`RateLimiter`). Generate keys with `doc-firewall audit keygen`.
+- **Tamper-Evident Audit Log** — Append-only JSONL file with a hash chain and a monotonic `seq` counter. Every scan appends an entry (file hash, verdict, risk score, threat IDs); `doc-firewall audit verify-chain` detects in-place edits and interior deletions. The default unkeyed SHA-256 chain is tamper-*evident*; set `DOC_FIREWALL_AUDIT_HMAC_KEY` for a keyed HMAC-SHA256 chain that is tamper-*resistant* (unforgeable without the key).
+- **REST API Authentication** — Salted PBKDF2-HMAC-SHA256-hashed API keys (`KeyStore`); legacy unsalted SHA-256 hashes are no longer accepted. Per-key token-bucket rate limiting (`RateLimiter`). Generate keys with `doc-firewall audit keygen`.
 - **STRIDE Threat Model** — Full component-level STRIDE analysis documented in `THREAT_MODEL.md` (8 components, MITRE ATT&CK mapping).
 - **Structured Threat Intelligence in Findings (B.19)** — `Finding` objects now carry three optional enrichment fields populated where known:
   - `cve: str` — CVE identifier (e.g. `"CVE-2017-11882"`) for findings tied to a specific vulnerability

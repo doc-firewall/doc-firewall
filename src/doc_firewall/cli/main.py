@@ -80,7 +80,8 @@ def _cmd_scan(args) -> None:
                     f.write(json.dumps(event) + "\n")
             else:
                 json.dump([r.to_dict() for _, r in all_reports], f, indent=2)
-        print(f"Wrote reports to {args.output}")
+        print(f"Wrote reports to {args.output}", file=sys.stderr)
+        _apply_exit_code(getattr(args, "fail_on", "none"), all_reports)
         return
 
     for p, report in all_reports:
@@ -94,6 +95,31 @@ def _cmd_scan(args) -> None:
                 print(f"- [{f.severity.value}] {f.threat_id.value}: {f.title}")
                 if f.explain:
                     print(f"  {f.explain}")
+
+    _apply_exit_code(getattr(args, "fail_on", "none"), all_reports)
+
+
+# Verdict severity ordering for --fail-on gating.
+_VERDICT_RANK = {"ALLOW": 0, "FLAG": 1, "BLOCK": 2}
+# Distinct from usage/operational errors (exit 1) so CI can tell a policy
+# failure ("a scanned document was flagged/blocked") apart from a crash.
+_FAIL_EXIT_CODE = 2
+
+
+def _apply_exit_code(fail_on: str, all_reports) -> None:
+    """Exit non-zero when a scanned document's verdict meets the --fail-on
+    threshold, so the CLI can gate CI / shell ingestion pipelines. Default
+    ('none') preserves the historical always-0 behaviour for existing scripts.
+    """
+    if fail_on == "none":
+        return
+    threshold = _VERDICT_RANK["BLOCK"] if fail_on == "block" else _VERDICT_RANK["FLAG"]
+    worst = max(
+        (_VERDICT_RANK.get(r.verdict.value, 0) for _, r in all_reports),
+        default=0,
+    )
+    if worst >= threshold:
+        sys.exit(_FAIL_EXIT_CODE)
 
 
 def _cmd_rules_test(args) -> None:
@@ -155,17 +181,24 @@ def _cmd_rules_test(args) -> None:
 
 def _cmd_audit_verify(args) -> None:
     from ..audit_log import verify_chain
-    result = verify_chain(args.log_file)
+    result = verify_chain(
+        args.log_file,
+        expected_count=getattr(args, "expected_count", None),
+    )
     print(str(result))
     sys.exit(0 if result.valid else 1)
 
 
 def _cmd_audit_keygen(args) -> None:
-    """Generate a new API key and print the hash suitable for the key store JSON."""
+    """Generate a new API key and print its salted PBKDF2 hash suitable for
+    the key store JSON."""
     import secrets
     import hashlib
     raw_key = secrets.token_urlsafe(32)
-    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+    iterations = 600_000  # OWASP-recommended floor for PBKDF2-HMAC-SHA256 (2023)
+    salt = secrets.token_bytes(16)
+    derived = hashlib.pbkdf2_hmac("sha256", raw_key.encode(), salt, iterations)
+    key_hash = f"pbkdf2_sha256${iterations}${salt.hex()}${derived.hex()}"
     print(f"Raw key  (share with client, never store): {raw_key}")
     print(f"Hash     (store in api_keys.json):         {key_hash}")
     entry = {"id": args.name or "new-key", "name": args.name or "", "hash": key_hash}
@@ -198,6 +231,15 @@ def main() -> None:
     )
     scan_p.add_argument("--json", action="store_true", help="Print JSON report")
     scan_p.add_argument(
+        "--fail-on", choices=["none", "flag", "block"], default="none",
+        dest="fail_on",
+        help=(
+            "Exit non-zero (code 2) when a scanned document's verdict meets or "
+            "exceeds this level, for CI / pipeline gating. Default: none "
+            "(always exit 0)."
+        ),
+    )
+    scan_p.add_argument(
         "--audit-log", metavar="PATH",
         help="Append scan results to a tamper-evident audit log at PATH",
     )
@@ -219,6 +261,14 @@ def main() -> None:
         help="Verify the integrity chain of an audit log file",
     )
     verify_p.add_argument("log_file", help="Path to the audit JSONL log file")
+    verify_p.add_argument(
+        "--expected-count", type=int, metavar="N", dest="expected_count",
+        help=(
+            "Expected number of entries (from an external anchor). When given, "
+            "a shorter log is flagged as truncated. Set "
+            "DOC_FIREWALL_AUDIT_HMAC_KEY to verify a keyed (HMAC) chain."
+        ),
+    )
 
     keygen_p = audit_sub.add_parser(
         "keygen",

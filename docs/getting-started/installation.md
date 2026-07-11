@@ -35,12 +35,32 @@ pip install "doc-firewall[ml]"
 
 Required for `enable_advanced_bert`, `enable_semantic_nn`, `enable_advanced_ahocorasick`, and `enable_advanced_tfidf` config flags.
 
+### REST API microservice
+
+Adds FastAPI + uvicorn + `python-multipart` for the standalone HTTP service
+(`uvicorn doc_firewall.api:app`, or the bundled `docker-compose-api.yml`).
+
+```bash
+pip install "doc-firewall[api]"
+```
+
 ### Steganography LSB analysis (optional add-on)
 
 Pillow is only needed for pixel-level LSB chi-square analysis (T7). If not installed, metadata entropy and PDF whitespace injection checks still run automatically.
 
 ```bash
 pip install Pillow
+```
+
+### Running the test suite
+
+The `[test]` extra pulls in `pytest`, `hypothesis`, and the soft deps the suite
+imports directly (`pyyaml`, `pyahocorasick`, `striprtf`, `html5lib`), so the
+suite is green from a single command:
+
+```bash
+pip install -e ".[test]"
+pytest -q      # from doc_guard_project/, with PYTHONPATH=src
 ```
 
 !!! tip "Virtual environments"
