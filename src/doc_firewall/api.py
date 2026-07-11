@@ -19,8 +19,10 @@ Endpoints
 Security controls (all driven by ``ScanConfig`` / ``DOC_FIREWALL_*`` env vars)
 ------------------------------------------------------------------------------
 * **API-key auth** — when ``api_keys_path`` points at a JSON key store the
-  ``X-API-Key`` header is required and validated against the stored SHA-256
-  hashes. When it is ``None`` the API is open (documented behaviour).
+  ``X-API-Key`` header is required and validated against the stored salted
+  PBKDF2-HMAC-SHA256 hashes (``doc-firewall audit keygen``). Legacy unsalted
+  SHA-256 hashes from older key stores are still accepted for compatibility.
+  When ``api_keys_path`` is ``None`` the API is open (documented behaviour).
 * **Per-key rate limiting** — ``api_rate_limit_rpm`` requests/minute/key
   (0 = unlimited), enforced with an in-memory sliding window.
 * **Upload cap** — ``api_max_upload_bytes`` bounds the request body so a large
@@ -34,6 +36,7 @@ without the ``api`` extra.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import tempfile
@@ -66,7 +69,8 @@ app = FastAPI(
 
 # ── API-key store ────────────────────────────────────────────────────────────
 def _load_api_key_hashes(path: Optional[str]) -> Optional[set]:
-    """Load the set of allowed SHA-256 key hashes from a JSON store.
+    """Load the set of allowed key hashes (salted PBKDF2, or legacy unsalted
+    SHA-256) from a JSON store.
 
     Accepts either a bare list of entries or a ``{"keys": [...]}`` wrapper;
     each entry is ``{"id", "name", "hash"}`` (as produced by
@@ -80,6 +84,39 @@ def _load_api_key_hashes(path: Optional[str]) -> Optional[set]:
     entries = data.get("keys", []) if isinstance(data, dict) else data
     hashes = {e["hash"].lower() for e in entries if isinstance(e, dict) and e.get("hash")}
     return hashes
+
+
+def _verify_api_key_legacy_sha256(provided_key: str, stored_hash: str) -> bool:
+    """Backward-compatible check for keys hashed with plain SHA-256 (pre-PBKDF2
+    key stores). Kept only for existing deployments; ``doc-firewall audit
+    keygen`` now emits salted PBKDF2 hashes for all new keys."""
+    computed = hashlib.sha256(provided_key.encode()).hexdigest()
+    return hmac.compare_digest(computed, stored_hash)
+
+
+def _verify_api_key_pbkdf2(provided_key: str, stored_hash: str) -> bool:
+    # Format: pbkdf2_sha256$<iterations>$<salt_hex>$<derived_key_hex>
+    parts = stored_hash.split("$")
+    if len(parts) != 4 or parts[0] != "pbkdf2_sha256":
+        return False
+    try:
+        iterations = int(parts[1])
+        salt = bytes.fromhex(parts[2])
+        expected_dk = bytes.fromhex(parts[3])
+    except (ValueError, TypeError):
+        return False
+    computed_dk = hashlib.pbkdf2_hmac(
+        "sha256", provided_key.encode(), salt, iterations, dklen=len(expected_dk)
+    )
+    return hmac.compare_digest(computed_dk, expected_dk)
+
+
+def _verify_api_key(provided_key: str, stored_hash: str) -> bool:
+    """Validate ``provided_key`` against one stored hash, salted-PBKDF2 first
+    with a fallback to the legacy unsalted SHA-256 format."""
+    if stored_hash.startswith("pbkdf2_sha256$"):
+        return _verify_api_key_pbkdf2(provided_key, stored_hash)
+    return _verify_api_key_legacy_sha256(provided_key, stored_hash)
 
 
 # ── Per-key rate limiter (in-memory sliding window) ──────────────────────────
@@ -159,11 +196,12 @@ def require_api_key(x_api_key: Optional[str] = Header(None)) -> str:
     else:
         if not x_api_key:
             raise HTTPException(status_code=401, detail="Missing X-API-Key header")
-        provided = hashlib.sha256(x_api_key.encode()).hexdigest()
-        if provided not in state.api_key_hashes:
+        if not any(_verify_api_key(x_api_key, stored) for stored in state.api_key_hashes):
             raise HTTPException(status_code=401, detail="Invalid API key")
-        # Rate-limit per key without exposing the raw key in memory keys.
-        key_id = provided[:16]
+        # Rate-limit per key without exposing the raw key or its auth hash in
+        # memory keys — this identifier is never compared against stored
+        # credentials, so a fast, unsalted digest is fine here.
+        key_id = hashlib.sha256(x_api_key.encode()).hexdigest()[:16]
 
     if not state.rate_limiter.allow(key_id):
         raise HTTPException(

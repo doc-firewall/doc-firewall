@@ -475,7 +475,7 @@ doc-firewall audit verify-chain /var/log/docfw/audit.jsonl --expected-count 1042
 
 ```python
 config = ScanConfig(
-    # Path to the JSON key store (SHA-256-hashed API keys)
+    # Path to the JSON key store (salted PBKDF2-HMAC-SHA256-hashed API keys)
     api_keys_path="/etc/docfw/api_keys.json",
 
     # Per-key token-bucket rate limit (requests per minute)

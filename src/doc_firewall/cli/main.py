@@ -190,11 +190,15 @@ def _cmd_audit_verify(args) -> None:
 
 
 def _cmd_audit_keygen(args) -> None:
-    """Generate a new API key and print the hash suitable for the key store JSON."""
+    """Generate a new API key and print its salted PBKDF2 hash suitable for
+    the key store JSON."""
     import secrets
     import hashlib
     raw_key = secrets.token_urlsafe(32)
-    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+    iterations = 600_000  # OWASP-recommended floor for PBKDF2-HMAC-SHA256 (2023)
+    salt = secrets.token_bytes(16)
+    derived = hashlib.pbkdf2_hmac("sha256", raw_key.encode(), salt, iterations)
+    key_hash = f"pbkdf2_sha256${iterations}${salt.hex()}${derived.hex()}"
     print(f"Raw key  (share with client, never store): {raw_key}")
     print(f"Hash     (store in api_keys.json):         {key_hash}")
     entry = {"id": args.name or "new-key", "name": args.name or "", "hash": key_hash}

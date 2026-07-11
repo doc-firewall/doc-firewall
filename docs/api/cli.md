@@ -163,7 +163,7 @@ doc-firewall audit verify-chain /var/log/docfw/audit.jsonl --expected-count 1042
 doc-firewall audit keygen [--name NAME] [--keys-path PATH]
 ```
 
-Generate a new API key and its SHA-256 hash, suitable for adding to the REST API key store.
+Generate a new API key and its salted PBKDF2-HMAC-SHA256 hash, suitable for adding to the REST API key store.
 
 | Option | Description |
 |---|---|

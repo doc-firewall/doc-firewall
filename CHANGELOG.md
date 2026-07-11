@@ -91,6 +91,11 @@ what the docs promise matches what a caller actually gets.
 - **Overstated "immutable" audit log.** The trust model is now stated precisely
   (unkeyed = tamper-evident; keyed HMAC = tamper-resistant) and backed by a
   `seq` counter + optional keyed chain rather than marketing language.
+- **REST API keys were hashed with unsalted SHA-256** (flagged by CodeQL as a
+  weak algorithm for credential hashing). `doc-firewall audit keygen` now
+  generates salted PBKDF2-HMAC-SHA256 hashes (600,000 iterations); the API
+  verifies both the new format and legacy unsalted SHA-256 hashes so existing
+  key stores keep working.
 
 ### Removed
 
