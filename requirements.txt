@@ -10,7 +10,7 @@ defusedxml==0.7.1
     # via doc-firewall (pyproject.toml)
 et-xmlfile==2.0.0
     # via openpyxl
-filelock==3.29.4
+filelock==3.29.5
     # via doc-firewall (pyproject.toml)
 lxml==6.1.1
     # via python-docx
@@ -22,7 +22,7 @@ pydantic==2.13.4
     # via
     #   doc-firewall (pyproject.toml)
     #   pydantic-settings
-pydantic-core==2.46.4
+pydantic-core==2.47.0
     # via pydantic
 pydantic-settings==2.14.2
     # via doc-firewall (pyproject.toml)
@@ -32,7 +32,7 @@ python-dotenv==1.2.2
     # via pydantic-settings
 structlog==26.1.0
     # via doc-firewall (pyproject.toml)
-typing-extensions==4.15.0
+typing-extensions==4.16.0
     # via
     #   pydantic
     #   pydantic-core
