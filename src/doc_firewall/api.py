@@ -1,0 +1,241 @@
+"""REST API microservice for doc-firewall.
+
+Exposes the scanner over HTTP so non-Python backends (Node.js, Go, …) can
+submit documents for scanning. Launched via::
+
+    uvicorn doc_firewall.api:app --host 0.0.0.0 --port 8000
+
+or the bundled ``docker-compose-api.yml``. Install the server deps with::
+
+    pip install -e ".[api]"
+
+Endpoints
+---------
+``GET  /health``  — liveness probe (no auth).
+``POST /scan``    — multipart file upload (field ``file``). Optional query
+                    params ``profile`` (lenient|balanced|strict) and
+                    ``enable_ml`` (bool). Returns the JSON scan report.
+
+Security controls (all driven by ``ScanConfig`` / ``DOC_FIREWALL_*`` env vars)
+------------------------------------------------------------------------------
+* **API-key auth** — when ``api_keys_path`` points at a JSON key store the
+  ``X-API-Key`` header is required and validated against the stored SHA-256
+  hashes. When it is ``None`` the API is open (documented behaviour).
+* **Per-key rate limiting** — ``api_rate_limit_rpm`` requests/minute/key
+  (0 = unlimited), enforced with an in-memory sliding window.
+* **Upload cap** — ``api_max_upload_bytes`` bounds the request body so a large
+  upload can't exhaust memory (enforced by Content-Length *and* by counting
+  streamed bytes, so a lying/absent Content-Length can't bypass it).
+
+This module imports FastAPI at import time; it is only loaded when the API is
+actually deployed (uvicorn target), so the base library still installs and runs
+without the ``api`` extra.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import tempfile
+import threading
+import time
+from collections import defaultdict, deque
+from typing import Deque, Dict, Optional
+
+try:
+    from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
+    from fastapi.responses import JSONResponse
+except ImportError as exc:  # pragma: no cover - only hit without the api extra
+    raise ImportError(
+        "The doc-firewall REST API requires FastAPI. Install the API extras: "
+        'pip install "doc-firewall[api]"'
+    ) from exc
+
+from .config import ScanConfig
+from .logger import get_logger
+from .scanner import Scanner
+
+logger = get_logger()
+
+app = FastAPI(
+    title="doc-firewall",
+    description="LLM-aware secure document intake scanner (REST API).",
+    version="1",
+)
+
+
+# ── API-key store ────────────────────────────────────────────────────────────
+def _load_api_key_hashes(path: Optional[str]) -> Optional[set]:
+    """Load the set of allowed SHA-256 key hashes from a JSON store.
+
+    Accepts either a bare list of entries or a ``{"keys": [...]}`` wrapper;
+    each entry is ``{"id", "name", "hash"}`` (as produced by
+    ``doc-firewall audit keygen``). Returns ``None`` when no store is
+    configured (open API).
+    """
+    if not path:
+        return None
+    with open(path, "r", encoding="utf-8") as fh:
+        data = json.load(fh)
+    entries = data.get("keys", []) if isinstance(data, dict) else data
+    hashes = {e["hash"].lower() for e in entries if isinstance(e, dict) and e.get("hash")}
+    return hashes
+
+
+# ── Per-key rate limiter (in-memory sliding window) ──────────────────────────
+class _RateLimiter:
+    def __init__(self, rpm: int) -> None:
+        self.rpm = rpm
+        self._hits: Dict[str, Deque[float]] = defaultdict(deque)
+        self._lock = threading.Lock()
+
+    def allow(self, key: str) -> bool:
+        if self.rpm <= 0:  # 0 = unlimited
+            return True
+        now = time.monotonic()
+        window_start = now - 60.0
+        with self._lock:
+            hits = self._hits[key]
+            while hits and hits[0] < window_start:
+                hits.popleft()
+            if len(hits) >= self.rpm:
+                return False
+            hits.append(now)
+            return True
+
+
+# ── App state, built once from config/env ────────────────────────────────────
+class _State:
+    def __init__(self) -> None:
+        self.config = ScanConfig()
+        self.api_key_hashes = _load_api_key_hashes(self.config.api_keys_path)
+        self.max_upload = int(self.config.api_max_upload_bytes)
+        self.rate_limiter = _RateLimiter(int(self.config.api_rate_limit_rpm))
+        # Cache one Scanner per (profile, enable_ml) combination — constructing a
+        # Scanner re-runs expensive one-time setup, so we never build one
+        # per request.
+        self._scanners: Dict[tuple, Scanner] = {}
+        self._scanner_lock = threading.Lock()
+
+    def get_scanner(self, profile: str, enable_ml: bool) -> Scanner:
+        cache_key = (profile, enable_ml)
+        scanner = self._scanners.get(cache_key)
+        if scanner is None:
+            with self._scanner_lock:
+                scanner = self._scanners.get(cache_key)
+                if scanner is None:
+                    cfg = ScanConfig(profile=profile)
+                    if enable_ml:
+                        cfg.enable_advanced_ahocorasick = True
+                        cfg.enable_advanced_bert = True
+                        cfg.enable_advanced_tfidf = True
+                        cfg.enable_credential_entropy = True
+                    # Carry the deployment's API/auth-independent settings.
+                    cfg.audit_log_path = self.config.audit_log_path
+                    scanner = self._scanners[cache_key] = Scanner(config=cfg)
+        return scanner
+
+
+_state: Optional[_State] = None
+_state_lock = threading.Lock()
+
+
+def _get_state() -> _State:
+    global _state
+    if _state is None:
+        with _state_lock:
+            if _state is None:
+                _state = _State()
+    return _state
+
+
+def require_api_key(x_api_key: Optional[str] = Header(None)) -> str:
+    """Validate the ``X-API-Key`` header against the key store and enforce the
+    per-key rate limit. Returns an opaque key id for logging."""
+    state = _get_state()
+
+    if state.api_key_hashes is None:
+        key_id = "anonymous"
+    else:
+        if not x_api_key:
+            raise HTTPException(status_code=401, detail="Missing X-API-Key header")
+        provided = hashlib.sha256(x_api_key.encode()).hexdigest()
+        if provided not in state.api_key_hashes:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+        # Rate-limit per key without exposing the raw key in memory keys.
+        key_id = provided[:16]
+
+    if not state.rate_limiter.allow(key_id):
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded ({state.rate_limiter.rpm} req/min)",
+        )
+    return key_id
+
+
+@app.get("/health")
+def health() -> dict:
+    return {"status": "ok", "service": "doc-firewall"}
+
+
+@app.post("/scan")
+async def scan_endpoint(
+    file: UploadFile = File(...),
+    profile: str = Query("balanced", pattern="^(lenient|balanced|strict)$"),
+    enable_ml: bool = Query(False),
+    content_length: Optional[int] = Header(None),
+    key_id: str = Depends(require_api_key),
+) -> JSONResponse:
+    state = _get_state()
+    max_upload = state.max_upload
+
+    # Reject early on a declared Content-Length over the cap …
+    if content_length is not None and content_length > max_upload:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Upload exceeds limit of {max_upload} bytes",
+        )
+
+    # … and enforce the real cap while streaming, so an absent/lying
+    # Content-Length can't smuggle an oversized body past the check.
+    suffix = os.path.splitext(file.filename or "")[1]
+    tmp_path = None
+    try:
+        fd, tmp_path = tempfile.mkstemp(prefix="docfw_api_", suffix=suffix)
+        total = 0
+        with os.fdopen(fd, "wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_upload:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Upload exceeds limit of {max_upload} bytes",
+                    )
+                out.write(chunk)
+
+        scanner = state.get_scanner(profile, enable_ml)
+        report = scanner.scan(tmp_path)
+        payload = report.to_dict()
+        # The temp path is an internal detail; report the submitted name.
+        payload["file_path"] = file.filename
+        logger.info(
+            "api scan complete",
+            key_id=key_id,
+            filename=file.filename,
+            verdict=report.verdict.value,
+        )
+        return JSONResponse(content=payload)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("api scan failed", filename=file.filename, error=str(exc))
+        raise HTTPException(status_code=500, detail="Scan failed") from exc
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass

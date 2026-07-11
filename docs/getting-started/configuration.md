@@ -358,6 +358,10 @@ limits:
   min_embedded_object_size_bytes: 20000
   max_archive_depth: 3                # Max recursion depth for ZIP/tar archive scanning
   max_archive_members: 50             # Max files scanned inside a single archive
+  max_archive_total_uncompressed_mb: 200  # Total expansion budget across a nested archive tree (zip-bomb bound)
+
+# Output / evidence
+evidence_max_chars: 250               # Uniform cap for evidence["malicious_text"] (chars); truncated values end with "…"
 ```
 
 !!! info "`thresholds.flag` / `thresholds.block` no longer drive the verdict (0.4.4+)"
@@ -441,15 +445,28 @@ ModelIntegrityChecker.generate_manifest(
 
 ```python
 config = ScanConfig(
-    # Path to the append-only JSONL audit log with SHA-256 hash chain
+    # Path to the append-only JSONL audit log (hash chain + monotonic seq counter)
     audit_log_path="/var/log/docfw/audit.jsonl",
 )
 ```
 
+**Trust model.** By default the chain is an **unkeyed SHA-256** hash chain —
+*tamper-evident*: it detects in-place edits and interior deletions, but anyone
+who can rewrite the whole file could recompute a valid chain. Set the deployment
+secret `DOC_FIREWALL_AUDIT_HMAC_KEY` to upgrade to a **keyed HMAC-SHA256** chain
+that is *tamper-resistant* — unforgeable without the key (which must also be
+present when verifying). For strong guarantees, also ship entries to append-only
+/ WORM storage.
+
 Verify log integrity with:
 
 ```bash
+# Unkeyed chain
 doc-firewall audit verify-chain /var/log/docfw/audit.jsonl
+
+# Keyed chain (+ optional external count anchor to catch tail-truncation)
+export DOC_FIREWALL_AUDIT_HMAC_KEY="…deployment secret…"
+doc-firewall audit verify-chain /var/log/docfw/audit.jsonl --expected-count 10423
 ```
 
 ---

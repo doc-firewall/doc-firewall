@@ -233,12 +233,19 @@ class TestConfigurable:
         cfg = ScanConfig(profile="balanced")
         cfg.sanitize_remove_categories = ["hidden_text", "macro"]
         res = Scanner(cfg).sanitize(src)
-        assert res.sanitized
+        # Category restriction worked: hidden_text + macro removed, metadata
+        # preserved (still in core.xml because the caller kept that category).
         kinds = {r.kind for r in res.removed}
         assert "hidden_text" in kinds and "macro" in kinds
         assert "metadata" not in kinds      # metadata preserved by config
         core = _read_part(res.output_path, "docProps/core.xml").decode("utf-8", "replace")
         assert _INJECT in core              # the keyword metadata is still there
+        # …but because the preserved metadata is itself a T8 injection, the
+        # cleaned copy still re-scans as a threat, so the residual-threat
+        # contract (BUG-2) must report sanitized=False so the caller blocks
+        # rather than trusting a still-malicious copy.
+        assert not res.sanitized
+        assert res.reason and "residual" in res.reason.lower()
         os.unlink(res.output_path)
 
     def test_caller_chosen_output_path(self, tmp_path):

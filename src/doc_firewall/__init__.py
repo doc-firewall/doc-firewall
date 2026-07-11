@@ -15,7 +15,7 @@ for _var, _val in (
 ):
     _os.environ.setdefault(_var, _val)
 
-from .scanner import Scanner, scan
+from .scanner import Scanner, scan, scan_bytes
 from .config import ScanConfig, Limits
 from .report import ScanReport, Finding
 from .policy import PolicyEngine, Policy
@@ -27,6 +27,7 @@ __all__ = [
     "ScanReport",
     "Finding",
     "scan",
+    "scan_bytes",
     "PolicyEngine",
     "Policy",
 ]

@@ -30,8 +30,9 @@ Scan a single file or a directory (recursively). When given a directory, every s
 |---|---|
 | `--profile [lenient\|balanced\|strict]` | Override the scan profile (default: `balanced`). `strict` lowers all detection thresholds for maximum recall. |
 | `--enable-ml` | Enable the remaining opt-in ML detectors: BERT (DeBERTa), TF-IDF drift, semantic NN, and steganography checks. YARA and Aho-Corasick are already on in all profiles. |
-| `--json` | Print results as a JSON object instead of human-readable text. |
+| `--json` | Print results as a JSON object instead of human-readable text. Machine output goes to **stdout only**; logs go to stderr, so `... --json > report.json` is always valid JSON. |
 | `--siem-format` | Print one JSON event per line (DataDog / Splunk / SIEM ingest format). |
+| `--fail-on [none\|flag\|block]` | Exit non-zero (code `2`) when a scanned document's verdict meets or exceeds this level, for CI / pipeline gating. Default `none` (always exit `0`). |
 | `--output PATH` | Write output to a file instead of stdout. |
 | `--audit-log PATH` | Append each scan result to a tamper-evident JSONL audit log. |
 | `--config PATH` | Load a `ScanConfig` from a YAML file. |
@@ -65,15 +66,21 @@ doc-firewall scan ./resumes/ --policy-file /etc/docfw/policy.yaml --policy-name 
 
 # Let glob matching pick the policy automatically (no explicit name)
 doc-firewall scan upload.pdf --policy-file /etc/docfw/policy.yaml
+
+# Gate a CI/ingestion pipeline — non-zero exit on a BLOCK verdict
+doc-firewall scan upload.pdf --fail-on block && ingest upload.pdf
 ```
 
 ### Exit Codes
 
+By default the `scan` command exits `0` regardless of verdict (so existing
+scripts don't break); pass `--fail-on` to gate on the verdict.
+
 | Code | Meaning |
 |---|---|
-| `0` | All files passed (verdict PASS or FLAG) |
-| `1` | One or more files returned verdict BLOCK |
-| `2` | Scan error (unsupported format, timeout, etc.) |
+| `0` | Command ran; no `--fail-on` threshold was met (or `--fail-on none`) |
+| `1` | Usage / operational error (bad arguments, path not found, policy load failure) |
+| `2` | `--fail-on` threshold met — a scanned document's verdict was FLAG/BLOCK at or above the requested level |
 
 ### Human-readable output format
 
@@ -123,17 +130,31 @@ Manage the tamper-evident audit log and REST API key store.
 ### `audit verify-chain`
 
 ```bash
-doc-firewall audit verify-chain AUDIT_LOG_PATH
+doc-firewall audit verify-chain AUDIT_LOG_PATH [--expected-count N]
 ```
 
-Verify the SHA-256 hash chain of an audit log. Exits `0` if the chain is intact, `1` if any entry has been tampered with. Use this in a nightly cron or CI check to detect unauthorized modifications to the log.
+Verify the hash chain of an audit log. Recomputes each entry's digest and checks
+the `prev_hash` links and the monotonic `seq` counter, so in-place edits and
+interior deletions are detected. Exits `0` if the chain is intact, `1` otherwise.
+Use it in a nightly cron or CI check.
+
+- **Keyed logs:** if the log was written with `DOC_FIREWALL_AUDIT_HMAC_KEY` set,
+  export the same key before verifying — the command reads it from the
+  environment and validates the HMAC chain.
+- **Tail-truncation:** the chain alone can't detect that the *last* N entries
+  were dropped. Pass `--expected-count N` (from an external anchor — e.g. a
+  counter you persist elsewhere) to catch it.
 
 ```bash
 # Verify a production audit log
 doc-firewall audit verify-chain /var/log/docfw/audit.jsonl
 
+# Verify a keyed chain and assert the expected entry count
+export DOC_FIREWALL_AUDIT_HMAC_KEY="…deployment secret…"
+doc-firewall audit verify-chain /var/log/docfw/audit.jsonl --expected-count 10423
+
 # Exit code 0 — chain intact
-# Exit code 1 — tampered entry detected (details printed to stderr)
+# Exit code 1 — tampered/deleted/truncated entry detected (details to stdout)
 ```
 
 ### `audit keygen`
