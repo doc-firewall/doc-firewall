@@ -146,6 +146,23 @@ def _default_reason(f: Finding, file_type: str) -> str:
     )
 
 
+# Single authoritative default cap for the concrete-evidence string. Detectors
+# historically truncated inline at 120/200/250/300; the contract now applies one
+# configurable cap uniformly (see ScanConfig.evidence_max_chars). Matches the
+# documented "maximum of 250 characters".
+DEFAULT_EVIDENCE_MAX_CHARS = 250
+
+
+def _truncate(text: str, max_chars: int) -> str:
+    """Cap ``text`` to at most ``max_chars`` characters, marking truncation with
+    a trailing ellipsis so a reviewer can tell the content was cut."""
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    if max_chars == 1:
+        return text[:1]
+    return text[: max_chars - 1] + "…"
+
+
 def requires_concrete_evidence(f: Finding) -> bool:
     """True when the contract applies to this finding."""
     if f.verdict_class == VerdictClass.INFO:
@@ -168,10 +185,25 @@ def apply_evidence_contract(
     findings: List[Finding],
     file_type: str = "",
     file_path: Optional[str] = None,
+    max_chars: int = DEFAULT_EVIDENCE_MAX_CHARS,
 ) -> List[Finding]:
     """Mutate ``findings`` in place so every HIGH/CRITICAL/BLOCK finding
-    satisfies the evidence contract. Returns the same list."""
+    satisfies the evidence contract. Returns the same list.
+
+    ``max_chars`` is the single authoritative cap for
+    ``evidence["malicious_text"]``, applied uniformly to **every** finding
+    (regardless of any inline cap a detector used) so SIEM output is bounded
+    and consistent with the documented value.
+    """
     for f in findings:
+        # Uniform truncation of any already-populated malicious_text, on every
+        # finding — one cap, applied in one place.
+        ev0 = f.evidence
+        if isinstance(ev0, dict):
+            mt0 = ev0.get("malicious_text")
+            if isinstance(mt0, str):
+                ev0["malicious_text"] = _truncate(mt0, max_chars)
+
         if not requires_concrete_evidence(f):
             continue
         ev: Dict[str, Any] = f.evidence if f.evidence is not None else {}
@@ -186,7 +218,7 @@ def apply_evidence_contract(
         for key in _FALLBACK_CONTENT_KEYS:
             val = ev.get(key)
             if isinstance(val, str) and val.strip():
-                ev["malicious_text"] = val[:300]
+                ev["malicious_text"] = _truncate(val, max_chars)
                 ev["malicious_text_source"] = key
                 promoted = True
                 break

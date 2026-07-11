@@ -95,6 +95,14 @@ class Limits(BaseSettings):
     # B.7: Recursive archive scanning limits
     max_archive_depth: int = Field(3, description="Max recursion depth for archive scanning")
     max_archive_members: int = Field(50, description="Max files to scan inside a single archive")
+    max_archive_total_uncompressed_mb: int = Field(
+        200,
+        description=(
+            "Total uncompressed-bytes budget across ALL members of a nested "
+            "archive tree. Bounds zip-bomb / decompression-ratio attacks so "
+            "expansion is linear, not exponential."
+        ),
+    )
 
 
 class Thresholds(BaseSettings):
@@ -233,6 +241,16 @@ class ScanConfig(BaseSettings):
             "preserve document properties)."
         ),
     )
+    sanitize_verify_rescan: bool = Field(
+        True,
+        description=(
+            "After producing a cleaned copy, re-scan it and downgrade the "
+            "result to sanitized=False if any residual threat remains (verdict "
+            "!= ALLOW). Guarantees the advertised trojan→BLOCK / sanitized→ALLOW "
+            "round-trip: a threat the sanitizer cannot remove (e.g. a visible-"
+            "body prompt injection) is never reported as neutralised."
+        ),
+    )
 
     # H.11 (0.4.8): coverage transparency. When True, a scan whose
     # ML-dependent threats (T1/T4) have no active detection capability
@@ -263,6 +281,17 @@ class ScanConfig(BaseSettings):
     audit_log_path: Optional[str] = Field(
         None,
         description="Path to append-only JSONL audit log. Disabled when None.",
+    )
+    # One authoritative, configurable truncation cap for the concrete-evidence
+    # string (``evidence["malicious_text"]``), applied uniformly across all
+    # detectors by the evidence contract. Matches the documented value; raise it
+    # for richer SIEM context, lower it to reduce log volume.
+    evidence_max_chars: int = Field(
+        250,
+        description=(
+            "Maximum length of evidence['malicious_text'] (characters). Applied "
+            "uniformly to every finding so SIEM output is bounded and consistent."
+        ),
     )
     api_keys_path: Optional[str] = Field(
         None,
@@ -951,6 +980,18 @@ class ScanConfig(BaseSettings):
     def apply_profile(self) -> "ScanConfig":
         # Logic to override limits/thresholds based on profile name
         # Note: In Pydantic model_validator(after), self is the Model instance.
+
+        # Fail loud on an unknown profile. Silently falling through to the base
+        # defaults would run a materially *weaker* scan than the caller asked
+        # for (e.g. a "strict"→"STRICT" typo disables BERT/NN) while still
+        # reporting success — a fail-in-the-wrong-direction bug for a security
+        # tool. Reject it instead of quietly degrading.
+        _VALID_PROFILES = ("lenient", "balanced", "strict")
+        if self.profile not in _VALID_PROFILES:
+            raise ValueError(
+                f"Unknown profile {self.profile!r}. Valid profiles are: "
+                f"{', '.join(_VALID_PROFILES)} (case-sensitive)."
+            )
 
         if self.profile == "strict":
             self.thresholds.deep_scan_trigger = 0.05

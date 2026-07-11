@@ -255,7 +255,9 @@ config = ScanConfig(
 
     enable_steganography_checks=True,   # LSB, metadata entropy, PDF whitespace injection
 
-    # ── Immutable audit log (SHA-256 hash chain) ────────────────────────────
+    # ── Tamper-evident audit log (hash chain) ───────────────────────────────
+    # Unkeyed SHA-256 by default; set DOC_FIREWALL_AUDIT_HMAC_KEY for a keyed,
+    # tamper-resistant HMAC chain.
     audit_log_path="/var/log/docfw/audit.jsonl",
 
     # ── REST API auth (when deploying api.py) ───────────────────────────────
@@ -282,7 +284,7 @@ MIT
 
 ## Log & Export Formatting
 When integrating with SIEMs via the CLI or generating JSON reports, the `evidence` dictionary of each finding will extract the exact strings causing security flags in a property named `malicious_text`. 
-*Note: The `malicious_text` property is restricted to a maximum of 250 characters to prevent log flooding.*
+*Note: The `malicious_text` property is truncated to a maximum of 250 characters by default to prevent log flooding, applied uniformly across all detectors. Adjust the cap with `ScanConfig.evidence_max_chars`; truncated values end with `…`.*
 
 Example Finding Output:
 ```json

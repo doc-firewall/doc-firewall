@@ -64,6 +64,12 @@ characters of the field — often containing none of the matched content.
 Every regex-based finding now centers `malicious_text` on the match and
 includes the exact `match` text separately.
 
+**One configurable length cap.** `malicious_text` is truncated to a single
+authoritative maximum — `ScanConfig.evidence_max_chars` (**default 250**) —
+applied uniformly to every finding by the evidence contract, so SIEM output is
+bounded and consistent across detectors. Truncated values end with `…`. Raise
+the cap for richer context or lower it to shrink log volume.
+
 **Misleading labels were renamed.** "SQL Injection in Metadata"
 (HIGH, confidence 0.9) is now "SQL-like Syntax in Metadata" (MEDIUM, 0.6):
 it is a heuristic that needs either two distinct SQL tokens or statement
@@ -93,7 +99,13 @@ report = scanner.scan("incoming.pdf")
 print(report.coverage["degraded"])          # True in reduced-coverage mode
 print(report.coverage["degraded_threats"])  # e.g. ["T1", "T4"]
 print(report.coverage["threat_status"])     # {"T1": "baseline-only", ...}
+print(report.coverage["profile"])           # effective profile that actually ran (0.5.1)
+print(report.coverage["effective_config"])  # {"profile":…, "fast_only":…, "ml":{…}}
 ```
+
+The `profile` / `effective_config` keys *(0.5.1)* let a caller confirm what
+actually ran — not just what they think they configured — closing the gap where
+a mis-set profile could silently degrade detection.
 
 A Scanner built in reduced-coverage mode also logs one loud warning naming
 each inactive capability and exactly how to turn it on.
@@ -109,6 +121,28 @@ cfg.required_capabilities = ["yara", "semantic_nn"]
 
 A document scanned with a required capability missing can no longer return
 ALLOW — it carries a `reduced_coverage` finding and escalates to FLAG.
+
+## Stable evidence schema (for SIEM consumers)
+
+*Stabilised in 0.5.1.* The `evidence` dict is open-ended — detectors add
+threat-specific keys — but the following keys are **stable** and safe to build
+SIEM queries, dashboards, and alerting on. New releases may add keys; these will
+not be renamed or repurposed without a major-version bump.
+
+| Key | Type | Meaning | When present |
+|---|---|---|---|
+| `malicious_text` | string | The offending content (or a match-centred excerpt), capped at `evidence_max_chars` (default 250; truncated values end with `…`). | Every HIGH/CRITICAL/BLOCK finding whose content is extractable. |
+| `malicious_text_source` | string | The original evidence key the `malicious_text` was promoted from (e.g. `hidden_text`, `match`, `target`). | When the value was promoted by the evidence contract. |
+| `subtype` | string | Detector-specific refinement of the T-code (e.g. `csv_dde`, `reduced_coverage`, `decompression_budget`). | Detector-dependent. |
+| `evidence_unavailable_reason` | string | Why the content could not be extracted (encrypted, unsupported filter, binary region). | Only when `malicious_text` is absent on a decision-driving finding. |
+| `debug_steps` | list[string] | Concrete, copy-pasteable commands to extract the content manually. | Alongside `evidence_unavailable_reason`. |
+| `archive_member` | string | Path of the originating member inside a scanned ZIP/tar. | Findings raised on an archive member. |
+
+Each finding also carries these **stable top-level** fields (see
+`Finding.to_dict()`): `threat_id`, `severity`, `title`, `explain`, `confidence`,
+`module`, `verdict_class`, and — when set — `mitre_technique`, `cve`,
+`attack_objective`. The `malicious_text` cap is configurable via
+`ScanConfig.evidence_max_chars` and applied uniformly across all detectors.
 
 Note: a format-*parsing* enabler (e.g. `olefile`, which lets the scanner
 read legacy `.doc`/`.xls`/`.ppt`) is **not** counted as malware

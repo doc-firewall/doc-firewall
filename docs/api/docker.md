@@ -21,6 +21,49 @@ The API listens on port `8000`. On a successful scan the response body is a JSON
 
 ---
 
+## Endpoints
+
+The service is a thin ASGI wrapper (`doc_firewall.api:app`) over the scanner.
+
+| Method & path | Auth | Description |
+|---|---|---|
+| `GET /health` | none | Liveness probe → `{"status": "ok"}`. |
+| `POST /scan` | API key (if configured) | Multipart upload; field `file`. Optional query params `profile` (`lenient\|balanced\|strict`) and `enable_ml` (bool). Returns the JSON scan report. |
+
+```bash
+# Scan with the strict profile and ML detectors enabled
+curl -X POST -F "file=@suspicious.pdf" \
+  "http://localhost:8000/scan?profile=strict&enable_ml=true"
+```
+
+### Authentication
+
+When `api_keys_path` (env `DOC_FIREWALL_API_KEYS_PATH`) points at a JSON key
+store, `POST /scan` requires an `X-API-Key` header; the raw key is verified
+against the stored salted PBKDF2-HMAC-SHA256 hash. Legacy unsalted SHA-256
+key-store entries are no longer accepted and must be regenerated with
+`doc-firewall audit keygen`. When `api_keys_path` is unset, the API is open
+(no auth) — do not expose it publicly in that mode.
+
+Generate a key + hash pair with the CLI, then add the printed JSON entry to the
+key store:
+
+```bash
+doc-firewall audit keygen --name "intake-service"
+```
+
+The store is a JSON array of `{"id", "name", "hash"}` entries (a
+`{"keys": [...]}` wrapper is also accepted).
+
+| Status | Meaning |
+|---|---|
+| `401` | Missing or invalid `X-API-Key` (when a key store is configured) |
+| `413` | Upload exceeds `api_max_upload_bytes` |
+| `429` | Per-key rate limit (`api_rate_limit_rpm`) exceeded |
+| `500` | Scan failed unexpectedly |
+
+---
+
 ## Security Hardening (3.6)
 
 Release 3.6 applies defence-in-depth hardening directly in `docker-compose-api.yml`.
@@ -124,8 +167,12 @@ prefix. Nested fields use double underscores (`__`) as separators.
 | `DOC_FIREWALL_API_MAX_UPLOAD_BYTES` | `api_max_upload_bytes` | `20971520` |
 | `DOC_FIREWALL_API_RATE_LIMIT_RPM` | `api_rate_limit_rpm` | `60` |
 
+| `DOC_FIREWALL_API_KEYS_PATH` | `api_keys_path` | `/etc/docfw/api_keys.json` |
+
 `DOC_FIREWALL_API_MAX_UPLOAD_BYTES` defaults to `20971520` (20 MB).
-`DOC_FIREWALL_API_RATE_LIMIT_RPM` defaults to `60` requests per minute per client IP.
+`DOC_FIREWALL_API_RATE_LIMIT_RPM` defaults to `60` requests per minute **per API
+key** (`0` = unlimited). When no key store is configured, all requests share a
+single `anonymous` bucket.
 
 ---
 
