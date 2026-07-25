@@ -1,3 +1,12 @@
 [[IgnoredVulns]]
 id = "GHSA-58qw-9mgm-455v"
 reason = "Vulnerability in pip handling concatenated tar/zip files. Our CI strictly installs from pinned hashes from trusted sources."
+
+[[IgnoredVulns]]
+id = "GHSA-h35f-9h28-mq5c"
+reason = "Vulnerability in setuptools not relevant as it is just built time dependency"
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-3447"
+reason = "Vulnerability in setuptools not relevant as it is just built time dependency"
+
