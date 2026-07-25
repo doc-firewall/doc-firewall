@@ -1,3 +1,1 @@
-[[IgnoredVulns]]
-id = "GHSA-58qw-9mgm-455v"
-reason = "Vulnerability in pip handling concatenated tar/zip files. Our CI strictly installs from pinned hashes from trusted sources."
+ 
