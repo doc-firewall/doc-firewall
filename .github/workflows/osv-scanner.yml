@@ -31,6 +31,7 @@ jobs:
         requirements-docker.txt
         examples/docker/requirements.txt
         tests/fuzz-requirements.txt
+        scripts/requirements-docs.txt
 
   # Used for pull requests — reports new vulnerabilities introduced by the PR
   osv-scan-pr:
@@ -48,3 +49,4 @@ jobs:
         requirements-docker.txt
         examples/docker/requirements.txt
         tests/fuzz-requirements.txt
+        scripts/requirements-docs.txt
