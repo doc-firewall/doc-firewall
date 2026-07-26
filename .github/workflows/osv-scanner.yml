@@ -26,8 +26,11 @@ jobs:
     secrets: inherit
     with:
       scan-args: |-
-        -r
-        ./
+        --experimental-no-resolve
+        requirements.txt
+        requirements-docker.txt
+        examples/docker/requirements.txt
+        tests/fuzz-requirements.txt
 
   # Used for pull requests — reports new vulnerabilities introduced by the PR
   osv-scan-pr:
@@ -40,5 +43,8 @@ jobs:
     secrets: inherit
     with:
       scan-args: |-
-        -r
-        ./
+        --experimental-no-resolve
+        requirements.txt
+        requirements-docker.txt
+        examples/docker/requirements.txt
+        tests/fuzz-requirements.txt
