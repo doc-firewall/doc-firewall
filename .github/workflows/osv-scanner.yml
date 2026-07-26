@@ -26,6 +26,7 @@ jobs:
     secrets: inherit
     with:
       scan-args: |-
+        --experimental-no-resolve
         requirements.txt
         requirements-docker.txt
         examples/docker/requirements.txt
@@ -42,6 +43,7 @@ jobs:
     secrets: inherit
     with:
       scan-args: |-
+        --experimental-no-resolve
         requirements.txt
         requirements-docker.txt
         examples/docker/requirements.txt
