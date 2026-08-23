@@ -12,7 +12,7 @@ et-xmlfile==2.0.0
     # via openpyxl
 filelock==3.32.3
     # via doc-firewall (pyproject.toml)
-lxml==6.1.1
+lxml==6.1.2
     # via python-docx
 numpy==2.2.6
     # via doc-firewall (pyproject.toml)
