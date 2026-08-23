@@ -28,7 +28,7 @@ pydantic-settings==2.15.0
     # via doc-firewall (pyproject.toml)
 python-docx==1.2.0
     # via doc-firewall (pyproject.toml)
-python-dotenv==1.2.2
+python-dotenv==1.2.3
     # via pydantic-settings
 structlog==26.1.0
     # via doc-firewall (pyproject.toml)
