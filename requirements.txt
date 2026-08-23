@@ -12,7 +12,7 @@ et-xmlfile==2.0.0
     # via openpyxl
 filelock==3.32.3
     # via doc-firewall (pyproject.toml)
-lxml==6.1.1
+lxml==6.1.2
     # via python-docx
 numpy==2.2.6
     # via doc-firewall (pyproject.toml)
@@ -28,7 +28,7 @@ pydantic-settings==2.15.0
     # via doc-firewall (pyproject.toml)
 python-docx==1.2.0
     # via doc-firewall (pyproject.toml)
-python-dotenv==1.2.2
+python-dotenv==1.2.3
     # via pydantic-settings
 structlog==26.1.0
     # via doc-firewall (pyproject.toml)
