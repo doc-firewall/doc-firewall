@@ -18,7 +18,7 @@ numpy==2.2.6
     # via doc-firewall (pyproject.toml)
 openpyxl==3.1.5
     # via doc-firewall (pyproject.toml)
-pydantic==2.13.4
+pydantic==2.13.5
     # via
     #   doc-firewall (pyproject.toml)
     #   pydantic-settings
