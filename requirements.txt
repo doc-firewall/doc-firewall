@@ -10,7 +10,7 @@ defusedxml==0.7.1
     # via doc-firewall (pyproject.toml)
 et-xmlfile==2.0.0
     # via openpyxl
-filelock==3.32.4
+filelock==3.32.5
     # via doc-firewall (pyproject.toml)
 lxml==6.1.2
     # via python-docx
