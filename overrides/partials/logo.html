@@ -1,0 +1,12 @@
+{#-
+  Overrides Material's default partials/logo.html to add explicit width/height.
+  Material renders the header logo at ~24px; we serve a 96px retina-ready WebP.
+  Explicit dimensions eliminate the Cumulative Layout Shift (CLS) caused by
+  the browser not knowing the intrinsic image size before download.
+-#}
+{% if config.theme.logo %}
+  <img src="{{ config.theme.logo | url }}" alt="DocFirewall logo" width="24" height="24" decoding="async">
+{% else %}
+  {% set icon = config.theme.icon.logo or "material/library" %}
+  {% include ".icons/" ~ icon ~ ".svg" %}
+{% endif %}
