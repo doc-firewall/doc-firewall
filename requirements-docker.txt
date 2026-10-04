@@ -1778,9 +1778,9 @@ semchunk==3.2.5 \
     --hash=sha256:ee15e9a06a69a411937dd8fcf0a25d7ef389c5195863140436872a02c95b0218 \
     --hash=sha256:fd09cc5f380bd010b8ca773bd81893f7eaf11d37dd8362a83d46cedaf5dae076
     # via docling-core
-sentence-transformers==5.4.1 \
-    --hash=sha256:436bcb1182a0ff42a8fb2b1c43498a70d0a75b688d182f2cd0d1dd115af61ddc \
-    --hash=sha256:a6d640fc363849b63affb8e140e9d328feabab86f83d58ac3e16b1c28140b790
+sentence-transformers==5.6.0 \
+    --hash=sha256:0e7164d051e416c1853ade7c274ff52af3f9da0f4be7f0b83d734c27699e1057 \
+    --hash=sha256:d2075b5e687a1611005e20ab04a6846994d51adfcf39610aed066af3c0c0b81f
     # via doc-firewall (pyproject.toml)
 shapely==2.1.2 \
     --hash=sha256:0036ac886e0923417932c2e6369b6c52e38e0ff5d9120b90eef5cd9a5fc5cae9 \
