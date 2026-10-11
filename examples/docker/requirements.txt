@@ -172,9 +172,9 @@ dill==0.4.1 \
 doc-firewall==0.3.2 \
     --hash=sha256:5472067c337a95f896ae39682e5a499bf9d0f5b352a935fa32c8ae8bb2eddecb \
     --hash=sha256:8434325bcbe615478f0590756ba5e6bbe798ab2beb7ec3bcafbc77d51df4faf2
-docling==2.94.0 \
-    --hash=sha256:13b87660a5f7d96a85e863da631bbf83e6496bd74ef5e950ca780dacdbe82b48 \
-    --hash=sha256:e5f0c79091d4654f9b9a8b28dc064e421253295b3dbefd3424831c7ccc00a23a
+docling==2.132.0 \
+    --hash=sha256:33b2ce9e34206d428fc0f23b56b312ff35547c33cebfcefede3a025c88181caf \
+    --hash=sha256:efd35e2f3832179c0c25476df763a13d2f14262d9e8dd3c4edad2aa7597bafde
 docling-core[chunking]==2.74.1 \
     --hash=sha256:46bf298686f2c51ddd69b6935a27dff1cc80838f2f5f1a8823492d99cf1a357b \
     --hash=sha256:e6464078012b3d45f4e0accd101fcb277063903f355eabbb9aee8de00527a789
