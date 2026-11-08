@@ -39,7 +39,7 @@ typing-extensions==4.16.0
     #   python-docx
     #   structlog
     #   typing-inspection
-typing-inspection==0.4.4
+typing-inspection==0.4.5
     # via
     #   pydantic
     #   pydantic-settings
