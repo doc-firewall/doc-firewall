@@ -22,7 +22,7 @@ pydantic==2.14.3
     # via
     #   doc-firewall (pyproject.toml)
     #   pydantic-settings
-pydantic-core==2.50.4
+pydantic-core==2.50.5
     # via pydantic
 pydantic-settings==2.15.0
     # via doc-firewall (pyproject.toml)
